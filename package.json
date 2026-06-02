@@ -1,0 +1,24 @@
+{
+  "name": "verifyflow",
+  "version": "0.1.0",
+  "description": "Evidence-backed delivery verification agent: does a PR deliver its linked Linear issue?",
+  "type": "module",
+  "bin": {
+    "verifyflow": "dist/cli/main.js",
+    "vf": "dist/cli/main.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "vf": "tsx src/cli/main.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

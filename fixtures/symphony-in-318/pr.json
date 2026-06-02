@@ -1,0 +1,18 @@
+{
+  "repo": "humanbased-ai/symphony",
+  "number": 69,
+  "url": "https://github.com/humanbased-ai/symphony/pull/69",
+  "title": "Add `--version` flag to the `sy` CLI",
+  "body": "## Linear\n\n- Issue: https://linear.app/inductive-network/issue/IN-318/add-version-flag-to-the-sy-cli\n\n## Summary\n\nMakes `sy --version` print `Symphony <version>` and exit 0.",
+  "headRef": "haol/in-318-add-version-flag-to-the-sy-cli",
+  "headSha": "7d7169704629",
+  "baseRef": "main",
+  "additions": 2,
+  "deletions": 2,
+  "changedFiles": [
+    { "path": "symphony/cli.py", "additions": 1, "deletions": 1 },
+    { "path": "tests/test_cli.py", "additions": 1, "deletions": 1 }
+  ],
+  "diff": "diff --git a/symphony/cli.py b/symphony/cli.py\n@@ def _add_version_argument(parser):\n-        version=f\"{parser.prog} {__version__}\",\n+        version=f\"Symphony {__version__}\",\n\ndiff --git a/tests/test_cli.py b/tests/test_cli.py\n@@ def test_version_exits_successfully_without_workflow_file(self):\n-        self.assertIn(__version__, stdout.getvalue())\n+        self.assertIn(f\"Symphony {__version__}\", stdout.getvalue())",
+  "source": "fixture"
+}

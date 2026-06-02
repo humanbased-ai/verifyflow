@@ -1,0 +1,18 @@
+{
+  "repo": "example/greet",
+  "number": 7,
+  "url": "https://github.com/example/greet/pull/7",
+  "title": "feat(cli): add --version flag",
+  "body": "## Linear\n\n- Issue: https://linear.app/example/issue/EX-1/add-version-flag\n\nAdds a --version flag that reads the version from package.json.",
+  "headRef": "feat/version",
+  "headSha": "deadbeefcafe0000",
+  "baseRef": "main",
+  "additions": 20,
+  "deletions": 0,
+  "changedFiles": [
+    { "path": "bin/greet.mjs", "additions": 12, "deletions": 0 },
+    { "path": "tests/greet.test.mjs", "additions": 8, "deletions": 0 }
+  ],
+  "diff": "(diff omitted in fixture)",
+  "source": "fixture"
+}
