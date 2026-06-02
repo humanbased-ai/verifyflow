@@ -109,10 +109,25 @@ export function heuristicProbe(text: string): Probe | undefined {
     ? 0
     : undefined;
 
-  return { command, expectSubstring, expectExitCode };
+  return { command, expectSubstring, expectExitCode, fromTicket: true };
 }
 
-/** Adopt only the safe fields of a model-proposed probe (never its cwd). */
+/** Coerce a model-supplied ticket-quality issue (string or object) into clean human text. */
+function normalizeQualityIssue(q: unknown): string[] {
+  if (typeof q === "string") return q.trim() ? [q.trim()] : [];
+  if (q && typeof q === "object") {
+    const o = q as Record<string, unknown>;
+    const label = typeof o.criterion === "string" ? o.criterion : undefined;
+    const body = [o.issue, o.text, o.message, o.note, o.problem].find(
+      (v) => typeof v === "string",
+    ) as string | undefined;
+    if (body) return [label ? `${label}: ${body}` : body];
+    return [JSON.stringify(q)];
+  }
+  return [];
+}
+
+/** Adopt only the safe fields of a model-proposed probe (never its cwd; never authoritative). */
 function sanitizeProbe(p: Probe): Probe {
   return {
     command: p.command,
@@ -208,8 +223,7 @@ async function enrichWithLlm(
     });
   }
   for (const q of parsed.ticketQualityIssues ?? []) {
-    const text = typeof q === "string" ? q : typeof q === "object" && q ? JSON.stringify(q) : "";
-    if (text.trim()) ticketQualityIssues.push(text.trim());
+    ticketQualityIssues.push(...normalizeQualityIssue(q));
   }
   return merged;
 }

@@ -10,8 +10,11 @@ export interface RepoConfig {
   setup: string[];
   /** Base test command (used when no changed test files can be scoped). */
   test: string;
-  /** Build a scoped test command for specific changed test files. */
-  testForFiles: (paths: string[]) => string | undefined;
+  /**
+   * Build a scoped test command for specific changed test files, optionally narrowed to
+   * keyword-matching tests (selective execution) when the runner supports it (e.g. pytest -k).
+   */
+  testForFiles: (paths: string[], keywords?: string[]) => string | undefined;
   /** Prefix used to run project entrypoints (e.g. "uv run"); undefined for none. */
   runPrefix?: string;
   /** Where the config came from: "file" | "inferred-python-uv" | "inferred-node" | "none". */
@@ -50,12 +53,15 @@ async function readExplicit(workdir: string): Promise<RepoConfig | undefined> {
       setup?: string[]; test?: string; runPrefix?: string; testGlobPrefix?: string;
     };
     const testGlobPrefix = j.testGlobPrefix ?? j.test ?? "uv run pytest";
+    const isPytest = /pytest/.test(testGlobPrefix);
     return {
       setup: j.setup ?? [],
       test: j.test ?? "uv run pytest",
       runPrefix: j.runPrefix,
-      testForFiles: (paths) =>
-        paths.length ? `${testGlobPrefix} ${paths.join(" ")}` : undefined,
+      testForFiles: (paths, keywords) =>
+        paths.length
+          ? `${testGlobPrefix} ${paths.join(" ")}${kFilter(isPytest, keywords)}`
+          : undefined,
       source: "file",
     };
   } catch {
@@ -86,8 +92,14 @@ function pythonUvConfig(source: string): RepoConfig {
     setup: ["uv sync --frozen || uv sync"],
     test: "uv run pytest -q",
     runPrefix: "uv run",
-    testForFiles: (paths) =>
-      paths.length ? `uv run pytest -q ${paths.join(" ")}` : undefined,
+    testForFiles: (paths, keywords) =>
+      paths.length ? `uv run pytest -q ${paths.join(" ")}${kFilter(true, keywords)}` : undefined,
     source,
   };
+}
+
+/** Build a pytest `-k` selector from keywords (selective execution); empty when unsupported. */
+function kFilter(isPytest: boolean, keywords?: string[]): string {
+  if (!isPytest || !keywords || keywords.length === 0) return "";
+  return ` -k "${keywords.join(" or ")}"`;
 }

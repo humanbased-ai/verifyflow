@@ -94,6 +94,16 @@ function evaluateCriterion(
 
   // Prefer the criterion's own probe; fall back to scoped tests.
   if (probe) {
+    if (probe.timedOut) {
+      return {
+        ...base,
+        result: "blocked",
+        reason: `Probe \`${probe.command}\` timed out — treated as environment/flake, not a product failure.`,
+        evidence: probe.evidence,
+        confidence: 0.5,
+        failureCategory: "test_flake",
+      };
+    }
     if (!probe.executed) {
       return {
         ...base,
@@ -121,6 +131,19 @@ function evaluateCriterion(
     const reason = !exitOk
       ? `Ran \`${probe.command}\`: exited ${probe.exitCode} (expected 0).`
       : `Ran \`${probe.command}\`: output did not contain expected "${c.probe!.expectSubstring}".`;
+    // Only a probe quoted in the ticket is authoritative enough to declare a product failure.
+    // An agent-invented probe that fails proves nothing about the product — it could be the
+    // probe that is wrong (fragile command, wrong env). Treat that as "could not verify".
+    if (!c.probe?.fromTicket) {
+      return {
+        ...base,
+        result: "not_evaluable",
+        reason: `Agent-constructed check did not pass (${reason}) — this corroborating probe is not authoritative, so the criterion could not be verified by execution and needs manual review.`,
+        evidence: probe.evidence,
+        confidence: 0.4,
+        failureCategory: "insufficient_evidence",
+      };
+    }
     return {
       ...base,
       result: "fail",
@@ -132,6 +155,16 @@ function evaluateCriterion(
   }
 
   if (scoped) {
+    if (scoped.timedOut) {
+      return {
+        ...base,
+        result: "blocked",
+        reason: "Scoped tests timed out — treated as environment/flake, not a product failure.",
+        evidence: scoped.evidence,
+        confidence: 0.5,
+        failureCategory: "test_flake",
+      };
+    }
     if (!scoped.executed) {
       return {
         ...base,
@@ -140,6 +173,16 @@ function evaluateCriterion(
         evidence: scoped.evidence,
         confidence: 0.5,
         failureCategory: "environment_failure",
+      };
+    }
+    if (scoped.exitCode === 5) {
+      return {
+        ...base,
+        result: "not_evaluable",
+        reason: "No tests matched the selective filter for this criterion.",
+        evidence: scoped.evidence,
+        confidence: 0.4,
+        failureCategory: "insufficient_evidence",
       };
     }
     if (scoped.exitCode === 0) {

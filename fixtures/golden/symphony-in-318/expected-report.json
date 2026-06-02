@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "request": {
+    "linearIssue": "IN-318",
+    "pullRequest": "https://github.com/humanbased-ai/symphony/pull/69",
+    "repo": "humanbased-ai/symphony",
+    "prNumber": 69,
+    "commitSha": "7d7169704629",
+    "level": "functional",
+    "backend": "claude-cli",
+    "policy": "merge_gate"
+  },
+  "issue": {
+    "key": "IN-318",
+    "title": "Add `--version` flag to the `sy` CLI",
+    "url": "https://linear.app/inductive-network/issue/IN-318/add-version-flag-to-the-sy-cli",
+    "source": "fixture"
+  },
+  "plan": {
+    "level": "functional",
+    "steps": [
+      {
+        "id": "setup-1",
+        "kind": "command",
+        "description": "environment setup: uv sync --frozen || uv sync",
+        "command": "uv sync --frozen || uv sync",
+        "criterionIds": [],
+        "reusedTestPoint": false
+      },
+      {
+        "id": "probe-AC-1",
+        "kind": "command",
+        "description": "probe for AC-1",
+        "command": "uv run sy --version",
+        "criterionIds": [
+          "AC-1"
+        ],
+        "expectSubstring": "Symphony",
+        "expectExitCode": 0,
+        "reusedTestPoint": false
+      },
+      {
+        "id": "probe-AC-2",
+        "kind": "command",
+        "description": "probe for AC-2",
+        "command": "uv run test \"$(sy --version)\" = \"Symphony $(python -c 'import importlib.metadata as m; print(m.version(\"symphony\"))')\"",
+        "criterionIds": [
+          "AC-2"
+        ],
+        "expectExitCode": 0,
+        "reusedTestPoint": false
+      },
+      {
+        "id": "tests-scoped",
+        "kind": "command",
+        "description": "scoped tests for changed test files: tests/test_cli.py",
+        "command": "uv run pytest -q tests/test_cli.py -k \"version\"",
+        "criterionIds": [
+          "AC-1",
+          "AC-2"
+        ],
+        "expectExitCode": 0,
+        "reusedTestPoint": false
+      }
+    ],
+    "notes": [
+      "repo config source: inferred-python-uv",
+      "2 runnable probe(s) planned.",
+      "selective execution: narrowed scoped tests to keywords [version]."
+    ]
+  },
+  "criterionResults": [
+    {
+      "criterionId": "AC-1",
+      "criterion": "`sy --version` prints `Symphony <version>` (e.g. `Symphony 0.1.0`) and exits 0.",
+      "method": "backend",
+      "result": "pass",
+      "reason": "Ran `uv run sy --version`: exit 0 and output contains \"Symphony\".",
+      "evidence": [
+        {
+          "type": "command_output",
+          "path": "probe-AC-1.log",
+          "summary": "output of `uv run sy --version`"
+        }
+      ],
+      "confidence": 0.92
+    },
+    {
+      "criterionId": "AC-2",
+      "criterion": "Version value is read from the package metadata (`importlib.metadata`) — not hardcoded.",
+      "method": "backend",
+      "result": "not_evaluable",
+      "reason": "Agent-constructed check did not pass (Ran `uv run test \"$(sy --version)\" = \"Symphony $(python -c 'import importlib.metadata as m; print(m.version(\"symphony\"))')\"`: exited 1 (expected 0).) — this corroborating probe is not authoritative, so the criterion could not be verified by execution and needs manual review.",
+      "evidence": [
+        {
+          "type": "command_output",
+          "path": "probe-AC-2.log",
+          "summary": "output of `uv run test \"$(sy --version)\" = \"Symphony $(python -c 'import importlib.metadata as m; print(m.version(\"symphony\"))')\"`"
+        }
+      ],
+      "confidence": 0.4,
+      "failureCategory": "insufficient_evidence"
+    }
+  ],
+  "runVerdict": "manual_review_required",
+  "summary": "Delivery verdict: manual_review_required. 2 criteria (1 pass, 1 not_evaluable).",
+  "ticketQualityIssues": [
+    "AC-2 mixes an observable outcome (printed version matches package metadata) with an implementation directive ('read via importlib.metadata', 'not hardcoded'). The directive itself is not black-box observable; the criterion is verifiable only as the proxy that output equals the metadata version. A reviewer could not distinguish a correctly-implemented dynamic read from a value that happens to match if hardcoded at the current version."
+  ],
+  "evidenceRoot": "runs/IN-318_pr69_20260602082421/artifacts",
+  "environment": {
+    "node": "v25.6.0",
+    "platform": "darwin",
+    "workdir": "/tmp/sym-verify",
+    "repoConfig": "inferred-python-uv"
+  },
+  "startedAt": "2026-06-02T08:24:21.712Z",
+  "finishedAt": "2026-06-02T08:24:56.445Z",
+  "durationMs": 836,
+  "gate": {
+    "blocked": true,
+    "reason": "policy=merge_gate and verdict=manual_review_required"
+  }
+}

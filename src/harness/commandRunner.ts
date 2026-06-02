@@ -7,12 +7,36 @@ import type { Evidence, HarnessResult, PlanStep } from "../types.js";
  * Executes a plan step as a real subprocess and captures its output as addressable evidence.
  * This is the "real execution" core: VerifyFlow runs the code, it does not infer from the diff.
  */
+export interface CommandRunnerTimeouts {
+  setupMs: number;
+  probeMs: number;
+  testMs: number;
+  defaultMs: number;
+}
+
+const DEFAULT_TIMEOUTS: CommandRunnerTimeouts = {
+  setupMs: 600_000, // dependency install can be slow
+  probeMs: 60_000, // a CLI probe should be fast; a hang is a signal
+  testMs: 240_000, // scoped tests; bounded so one hung test can't stall the run
+  defaultMs: 180_000,
+};
+
 export class CommandRunner {
+  private readonly timeouts: CommandRunnerTimeouts;
   constructor(
     private readonly workdir: string,
     private readonly artifactRoot: string,
-    private readonly timeoutMs = 600_000,
-  ) {}
+    timeouts: Partial<CommandRunnerTimeouts> = {},
+  ) {
+    this.timeouts = { ...DEFAULT_TIMEOUTS, ...timeouts };
+  }
+
+  private timeoutFor(stepId: string): number {
+    if (stepId.startsWith("setup-")) return this.timeouts.setupMs;
+    if (stepId.startsWith("probe-")) return this.timeouts.probeMs;
+    if (stepId.startsWith("tests")) return this.timeouts.testMs;
+    return this.timeouts.defaultMs;
+  }
 
   async runStep(step: PlanStep): Promise<HarnessResult> {
     if (step.kind !== "command" || !step.command) {
@@ -23,6 +47,7 @@ export class CommandRunner {
         stderr: "",
         durationMs: 0,
         executed: false,
+        timedOut: false,
         evidence: [],
       };
     }
@@ -33,13 +58,17 @@ export class CommandRunner {
       .then((s) => s.isDirectory())
       .catch(() => false);
     if (!cwdExists) cwd = path.resolve(this.workdir);
-    const res = await run("sh", ["-c", step.command], { cwd, timeoutMs: this.timeoutMs });
+    const res = await run("sh", ["-c", step.command], {
+      cwd,
+      timeoutMs: this.timeoutFor(step.id),
+    });
 
     await fs.mkdir(this.artifactRoot, { recursive: true });
     const logName = `${step.id}.log`;
     const logPath = path.join(this.artifactRoot, logName);
     const header =
       `$ ${step.command}\n(cwd: ${cwd})\n(exit: ${res.code}, executed: ${res.executed}` +
+      (res.timedOut ? `, TIMED OUT after ${res.durationMs}ms` : "") +
       (res.spawnError ? `, spawnError: ${res.spawnError}` : "") +
       `)\n${"-".repeat(60)}\n`;
     await fs.writeFile(logPath, header + res.stdout + (res.stderr ? `\n[stderr]\n${res.stderr}` : ""));
@@ -61,6 +90,7 @@ export class CommandRunner {
       stderr: res.stderr,
       durationMs: res.durationMs,
       executed: res.executed,
+      timedOut: res.timedOut,
       evidence,
     };
   }

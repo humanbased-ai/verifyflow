@@ -73,8 +73,11 @@ export async function buildPlan(
     .map((f) => f.path)
     .filter((p) => /(^|\/)tests?\//.test(p) || /(_test|test_|\.test|\.spec)\.[a-z]+$/.test(p));
   const allCriterionIds = criteria.criteria.map((c) => c.id);
-  const scopedTest = cfg.testForFiles(changedTests);
+  const keywords = deriveTestKeywords(criteria);
+  const scopedTest = cfg.testForFiles(changedTests, keywords);
   if (scopedTest) {
+    if (keywords.length)
+      notes.push(`selective execution: narrowed scoped tests to keywords [${keywords.join(", ")}].`);
     steps.push({
       id: "tests-scoped",
       kind: "command",
@@ -93,6 +96,35 @@ export async function buildPlan(
   const escalationRecommended = recommendEscalation(level, criteria, pr);
 
   return { level, steps, notes, escalationRecommended };
+}
+
+const STOPWORDS = new Set([
+  "value", "prints", "print", "exits", "exit", "should", "package", "metadata",
+  "hardcoded", "read", "from", "with", "that", "this", "when", "then", "have", "the",
+  "and", "for", "are", "not", "version",
+]);
+
+/**
+ * Derive selective-execution keywords from the criteria. Prefers CLI flags named in probes
+ * (e.g. `--version` -> "version"), then distinctive lowercase tokens from the criterion text.
+ * Used to narrow pytest runs with `-k` so one hung/irrelevant test cannot stall verification.
+ */
+export function deriveTestKeywords(criteria: CriteriaModel): string[] {
+  const out = new Set<string>();
+  for (const c of criteria.criteria) {
+    const flags = [...(c.probe?.command ?? "").matchAll(/--([a-z][\w-]+)/g)].map((m) => m[1]!);
+    for (const f of flags) out.add(f.toLowerCase());
+  }
+  if (out.size === 0) {
+    for (const c of criteria.criteria) {
+      for (const tok of c.text.toLowerCase().match(/[a-z]{5,}/g) ?? []) {
+        if (!STOPWORDS.has(tok)) out.add(tok);
+        if (out.size >= 4) break;
+      }
+      if (out.size >= 4) break;
+    }
+  }
+  return [...out].slice(0, 4);
 }
 
 function recommendEscalation(

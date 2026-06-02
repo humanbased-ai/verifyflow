@@ -66,6 +66,30 @@ Captured fixture: `fixtures/symphony-in-318/` (issue.json via the Linear connect
 Live run: `vf run --fixtures fixtures/symphony-in-318 --pr …/pull/69 --workdir <symphony checkout>`
 (after `git checkout <head>` + `uv sync`), or fully live with `--checkout` + `LINEAR_API_KEY`.
 
+## Verdict integrity (learned from the live Symphony dogfood)
+
+Real runs against Symphony surfaced three failure modes the engine now handles, so a
+genuinely-good PR is never falsely failed:
+
+- **Authoritative vs corroborating probes.** A probe whose command is *quoted in the ticket*
+  (e.g. the issue literally says run `sy --version`) is authoritative — its failure is a real
+  `fail`. An *agent-invented* probe only corroborates: it can confirm a `pass`, but its failure
+  yields `not_evaluable` (the probe may be wrong, not the product). This prevented a false
+  `needs_fix` when a model-built check used the wrong Python env.
+- **Timeout ≠ failure.** A hung/killed command (per-step time budgets: probe 60s, tests 240s,
+  setup 600s) is `blocked`/flake, never a product `fail`.
+- **Selective execution.** Scoped tests are narrowed to the changed test files *and* to
+  keyword-matched tests (`pytest -k`). On Symphony the version test runs in 0.07s instead of
+  hanging on 59 unrelated daemon tests.
+
+## Golden cases
+
+`fixtures/golden/` holds known-answer cases that calibrate accuracy over time
+(`docs/improvement-directions.md` §5.1.4). The first is **Symphony PR #69 ↔ IN-318**: expected
+verdict `manual_review_required` (AC-1 proven, AC-2 escalated). A hermetic regression test replays
+the real captured execution through the verdict engine — locking in that this good PR is never
+marked `needs_fix`.
+
 ## Layout
 
 ```

@@ -7,6 +7,8 @@ export interface ExecResult {
   durationMs: number;
   /** False when the process could not be spawned at all (binary missing, etc.). */
   executed: boolean;
+  /** True when the process was killed because it exceeded timeoutMs. */
+  timedOut: boolean;
   spawnError?: string;
 }
 
@@ -45,6 +47,7 @@ export function run(
         stderr: "",
         durationMs: 0,
         executed: false,
+        timedOut: false,
         spawnError: err instanceof Error ? err.message : String(err),
       });
       return;
@@ -53,9 +56,13 @@ export function run(
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let timedOut = false;
     const timer = opts.timeoutMs
       ? setTimeout(() => {
-          if (!settled) child.kill("SIGKILL");
+          if (!settled) {
+            timedOut = true;
+            child.kill("SIGKILL");
+          }
         }, opts.timeoutMs)
       : undefined;
 
@@ -70,6 +77,7 @@ export function run(
         stderr,
         durationMs: Math.round(durationMs),
         executed: spawnError === undefined,
+        timedOut,
         spawnError,
       });
     };

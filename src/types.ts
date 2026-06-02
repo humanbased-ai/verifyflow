@@ -115,6 +115,12 @@ export interface Probe {
   expectSubstring?: string;
   /** cwd relative to the target checkout root. */
   cwd?: string;
+  /**
+   * True when the command was quoted in the ticket itself (authoritative — its failure is a
+   * real product `fail`). False/undefined for agent-invented probes, which only corroborate:
+   * a pass is evidence, but a failure means "could not verify", not "violated".
+   */
+  fromTicket?: boolean;
 }
 
 export interface Criterion {
@@ -166,6 +172,8 @@ export interface HarnessResult {
   durationMs: number;
   /** True when the step ran to completion (regardless of pass/fail); false on env/spawn failure. */
   executed: boolean;
+  /** True when the step was killed for exceeding its time budget (treated as environment/flake, not product fail). */
+  timedOut: boolean;
   evidence: Evidence[];
 }
 
