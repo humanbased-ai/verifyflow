@@ -1,0 +1,8 @@
+{
+  "key": "EX-1",
+  "title": "Add --version flag to the greet CLI",
+  "description": "## Summary\n\n`greet --version` should print the tool name and version so users know which build they run.\n\n## Acceptance Criteria\n\n* `node bin/greet.mjs --version` prints `ExampleCLI <version>` (e.g. `ExampleCLI 1.2.3`) and exits 0.\n* Version value is read from package.json metadata — not hardcoded.\n",
+  "url": "https://linear.app/example/issue/EX-1/add-version-flag",
+  "status": "In Review",
+  "source": "fixture"
+}

@@ -1,0 +1,16 @@
+{
+  "case": "symphony-in-318",
+  "linear_issue": "IN-318",
+  "pull_request": "humanbased-ai/symphony#69",
+  "commit_sha": "7d7169704629",
+  "level": "functional",
+  "ground_truth": "PR #69 genuinely delivers IN-318: `sy --version` prints `Symphony 0.1.0`. AC-2 ('not hardcoded') is satisfied in reality but is an implementation constraint that execution alone cannot prove.",
+  "expected": {
+    "runVerdict": "manual_review_required",
+    "criteria": {
+      "AC-1": { "result": "pass", "why": "ticket-quoted probe `sy --version` ran: exit 0 and output contains 'Symphony'" },
+      "AC-2": { "result": "not_evaluable", "why": "no ticket-quoted probe; an agent-invented check is not authoritative, and 'not hardcoded' is not observable by execution -> escalate to human, do not fail" }
+    }
+  },
+  "must_not": "needs_fix — that would be a false negative on a good PR (the earlier bug, now regression-locked by symphony-in-318.golden.test.ts)"
+}

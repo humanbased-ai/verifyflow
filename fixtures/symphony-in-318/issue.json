@@ -1,0 +1,8 @@
+{
+  "key": "IN-318",
+  "title": "Add `--version` flag to the `sy` CLI",
+  "description": "## Summary\n\n`sy --version` currently errors instead of printing the version string. Wire up the version from `pyproject.toml` so users can confirm which build they're running.\n\n## Acceptance Criteria\n\n* `sy --version` prints `Symphony <version>` (e.g. `Symphony 0.1.0`) and exits 0.\n* Version value is read from the package metadata (`importlib.metadata`) — not hardcoded.\n\n## Implementation Hint\n\nIn the CLI entry point, add a `--version` option that reads `importlib.metadata.version(\"symphony\")` and prints + exits 0.",
+  "url": "https://linear.app/inductive-network/issue/IN-318/add-version-flag-to-the-sy-cli",
+  "status": "Canceled",
+  "source": "fixture-via-linear-connector"
+}

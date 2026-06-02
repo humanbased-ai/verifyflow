@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+
+# VerifyFlow run output (artifacts, reports, event logs, memory)
+.verifyflow/
+artifacts/
+
+# Local clones of target repos used for live dogfood runs
+.targets/
+
+# Editor
+.idea/
+.DS_Store

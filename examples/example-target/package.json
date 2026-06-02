@@ -1,0 +1,7 @@
+{
+  "name": "example-cli",
+  "version": "1.2.3",
+  "type": "module",
+  "private": true,
+  "description": "A tiny real target VerifyFlow executes against in its hermetic e2e test."
+}
