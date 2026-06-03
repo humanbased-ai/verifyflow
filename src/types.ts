@@ -54,6 +54,13 @@ export interface Evidence {
   summary?: string;
   /** External reference (URL) when the evidence lives elsewhere (e.g. CI artifact). */
   ref?: string;
+  /**
+   * Truncated inline excerpt of the evidence content (IN-579). Artifacts live on the
+   * runner's disk, which a PR reviewer cannot reach — the excerpt travels with the report
+   * so the PR comment can show the actual output in a collapsed block. Command-output
+   * evidence only; capped at ~1.2KB with an explicit truncation marker.
+   */
+  excerpt?: string;
 }
 
 /** Normalized invocation request produced by every trigger adapter. */

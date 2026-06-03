@@ -85,7 +85,12 @@ export class CommandRunner {
 
     const relLog = path.relative(this.artifactRoot, logPath);
     const evidence: Evidence[] = [
-      { type: "command_output", path: relLog, summary: `output of \`${step.command}\`` },
+      {
+        type: "command_output",
+        path: relLog,
+        summary: `output of \`${step.command}\``,
+        excerpt: buildEvidenceExcerpt(header, res.stdout, res.stderr),
+      },
     ];
     if (/\b(pytest|jest|vitest|go test|cargo test|npm test|unittest)\b/.test(step.command)) {
       evidence.push({ type: "test_report", path: relLog, summary: "test runner output" });
@@ -104,4 +109,29 @@ export class CommandRunner {
       evidence,
     };
   }
+}
+
+/**
+ * Inline excerpt of a command's evidence for the report/PR comment (IN-579).
+ * Artifacts live on the runner's disk, unreachable from GitHub — the excerpt travels
+ * with the Evidence so a PR reviewer can see the actual output. Head + tail are kept
+ * (failures usually surface at the end) with an explicit truncation marker between.
+ */
+export function buildEvidenceExcerpt(
+  header: string,
+  stdout: string,
+  stderr: string,
+  maxChars = 1200,
+): string {
+  const body = stdout + (stderr ? `\n[stderr]\n${stderr}` : "");
+  const full = header + body;
+  if (full.length <= maxChars) return full;
+  const headBudget = Math.max(header.length, Math.floor(maxChars * 0.6));
+  const tailBudget = maxChars - headBudget;
+  const truncated = full.length - headBudget - tailBudget;
+  return (
+    full.slice(0, headBudget) +
+    `\n… [${truncated} chars truncated — full log: see artifact] …\n` +
+    full.slice(-tailBudget)
+  );
 }
