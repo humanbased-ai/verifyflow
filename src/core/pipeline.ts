@@ -239,6 +239,7 @@ async function persistMemoryAndEvents(
       component,
       duration_ms: ranById.get(`probe-${cr.criterionId}`)?.durationMs,
       is_flaky_suspected: false,
+      reused: plan.steps.find((s) => s.id === `probe-${cr.criterionId}`)?.reusedTestPoint ?? false,
     });
   }
   events.push({
