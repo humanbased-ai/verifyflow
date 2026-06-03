@@ -79,13 +79,18 @@ export class LinearApiClient implements LinearClient {
 }
 
 /**
- * Extract the linked Linear issue key from a PR body, when present.
- * Symphony PR bodies carry a `## Linear` section with the issue URL. We use this only to
- * RESOLVE which issue to load — never as the acceptance-criteria source (PR is reference only).
+ * Extract the linked Linear issue key from a PR, when present.
+ * Symphony PR bodies carry a `## Linear` section with the issue URL; Symphony/Linear branches
+ * embed the key (`haol/in-569-...`). Body wins (explicit link), branch name is the fallback.
+ * We use this only to RESOLVE which issue to load — never as the acceptance-criteria source
+ * (PR is reference only).
  */
 export function linearKeyFromPr(pr: PrContext): string | undefined {
   const url = pr.body.match(/linear\.app\/[^/]+\/issue\/([A-Z]+-\d+)/i);
   if (url) return url[1]!.toUpperCase();
   const bare = pr.body.match(/\b([A-Z]{2,}-\d+)\b/);
-  return bare ? bare[1]!.toUpperCase() : undefined;
+  if (bare) return bare[1]!.toUpperCase();
+  // Linear's generated branch format: <user>/<team>-<number>-<slug> (e.g. haol/in-569-step-adapter).
+  const branch = pr.headRef.match(/(?:^|\/)([A-Za-z]{2,})-(\d+)(?:-|$)/);
+  return branch ? `${branch[1]!.toUpperCase()}-${branch[2]}` : undefined;
 }

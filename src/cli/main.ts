@@ -12,12 +12,21 @@ import { EventLog } from "../memory/eventLog.js";
 import { ensurePrCheckout } from "../harness/checkout.js";
 import { renderMarkdown, postPrComment } from "../core/reporting/reporter.js";
 import { computeMetrics, renderMetricsMarkdown } from "../core/reporting/metrics.js";
+import { buildStepSummary } from "./step.js";
 
 const USAGE = `verifyflow — evidence-backed delivery verification
 
 Usage:
   vf run    --linear <KEY|url> --pr <url|owner/repo#N|#N> --level <functional|ui|journey> [options]
+  vf step   --pr <url> [options]      Orchestrator-facing step (Symphony, IN-569): advisory-only,
+                                      auto-resolves the Linear issue from the PR (body or branch),
+                                      checks out + executes + posts the report comment, and prints
+                                      a single machine-readable JSON line to stdout. Never blocks.
   vf report [--out <dir>] [--json]    Aggregate accumulated runs into quality-intelligence metrics.
+
+Step-only options:
+  --crosscheck-verdict <v>  Crosscheck verdict handed in by the caller (recorded, not gated on).
+  --no-comment              Skip posting the PR comment (default for step: comment on).
 
 Options:
   --linear <KEY|url>     Linear issue (PRIMARY source of acceptance criteria).
@@ -76,7 +85,21 @@ async function buildLlm(args: Args): Promise<LlmClient> {
   return new FallbackLlm();
 }
 
-async function cmdRun(args: Args): Promise<number> {
+interface RunOutcome {
+  report: Awaited<ReturnType<typeof runVerification>>["report"];
+  runDir: string;
+  reportPaths: Awaited<ReturnType<typeof runVerification>>["reportPaths"];
+  signalPath?: string;
+  prCommentPosted: boolean;
+}
+
+/**
+ * Shared run executor behind `vf run` and `vf step`: validates args, builds clients,
+ * checks out the PR head when asked, runs the verification pipeline, and performs the
+ * PR-comment / Linear write-backs. Writes only to stderr — stdout is owned by the caller
+ * (markdown for `run`, a single JSON line for `step`).
+ */
+async function executeRun(args: Args): Promise<RunOutcome | number> {
   const pr = str(args.pr);
   const level = (str(args.level) ?? "functional") as Level;
   if (!pr) {
@@ -145,6 +168,7 @@ async function cmdRun(args: Args): Promise<number> {
     workdir: workdir ? path.resolve(workdir) : undefined,
     baseUrl: str(args["base-url"]),
     sandbox: !args["no-sandbox"],
+    crosscheckVerdict: str(args["crosscheck-verdict"]),
   };
 
   const deps: PipelineDeps = {
@@ -161,17 +185,19 @@ async function cmdRun(args: Args): Promise<number> {
     );
   }
 
-  const { report, reportPaths, signalPath } = await runVerification(request, deps);
+  const { report, runDir, reportPaths, signalPath } = await runVerification(request, deps);
 
-  console.log(renderMarkdown(report));
   console.error(`\n[verifyflow] reports: ${reportPaths.markdownPath} | ${reportPaths.jsonPath}`);
   if (signalPath) {
     console.error(`[verifyflow] bounce-back signal (feed to the coding agent): ${signalPath}`);
   }
 
+  let prCommentPosted = false;
   if (args.comment && !fixtures) {
-    const ok = await postPrComment(report, renderMarkdown(report));
-    console.error(ok ? "[verifyflow] posted/updated PR comment." : "[verifyflow] failed to post PR comment.");
+    prCommentPosted = await postPrComment(report, renderMarkdown(report));
+    console.error(
+      prCommentPosted ? "[verifyflow] posted/updated PR comment." : "[verifyflow] failed to post PR comment.",
+    );
   }
 
   if (args["linear-writeback"] && !fixtures && linear.addComment) {
@@ -182,7 +208,48 @@ async function cmdRun(args: Args): Promise<number> {
     console.error(ok ? "[verifyflow] posted Linear comment." : "[verifyflow] failed to post Linear comment.");
   }
 
-  if (report.gate?.blocked) return 1;
+  return { report, runDir, reportPaths, signalPath, prCommentPosted };
+}
+
+async function cmdRun(args: Args): Promise<number> {
+  const outcome = await executeRun(args);
+  if (typeof outcome === "number") return outcome;
+
+  console.log(renderMarkdown(outcome.report));
+
+  if (outcome.report.gate?.blocked) return 1;
+  return 0;
+}
+
+/**
+ * Orchestrator-facing step entrypoint (IN-569): Symphony invokes this after Crosscheck.
+ * Advisory-only — exit 0 whenever verification completed, regardless of the verdict;
+ * non-zero only on operational failure. Prints exactly one JSON line on stdout.
+ */
+async function cmdStep(args: Args): Promise<number> {
+  if (args.policy && str(args.policy) !== "advisory") {
+    console.error("error: vf step is advisory-only (phase 1) — --policy cannot be changed. Use vf run for gating.");
+    return 2;
+  }
+  args.policy = "advisory";
+
+  const fixtures = str(args.fixtures);
+  // Step defaults: live execution against the PR head, report posted back to the PR.
+  if (!args.workdir && !fixtures) args.checkout = true;
+  if (!args["no-comment"] && !fixtures) args.comment = true;
+
+  const outcome = await executeRun(args);
+  if (typeof outcome === "number") return outcome;
+
+  const summary = buildStepSummary({
+    report: outcome.report,
+    runDir: outcome.runDir,
+    reportJsonPath: outcome.reportPaths.jsonPath,
+    reportMarkdownPath: outcome.reportPaths.markdownPath,
+    signalPath: outcome.signalPath,
+    prCommentPosted: outcome.prCommentPosted,
+  });
+  console.log(JSON.stringify(summary));
   return 0;
 }
 
@@ -205,6 +272,7 @@ async function main(): Promise<number> {
     return cmd === "" ? 2 : 0;
   }
   if (cmd === "run") return cmdRun(args);
+  if (cmd === "step") return cmdStep(args);
   if (cmd === "report") return cmdReport(args);
   console.error(`unknown command: ${cmd}\n`);
   console.log(USAGE);
