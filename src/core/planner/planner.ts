@@ -31,6 +31,21 @@ export async function buildPlan(
   const steps: PlanStep[] = [];
   const notes: string[] = [`repo config source: ${cfg.source}`];
 
+  // Unknown toolchain: emit no steps and signal environment-blocked. Never guess commands.
+  if (cfg.unknown) {
+    const reason =
+      "Could not determine how to set up/run this repo (no verifyflow.config.json and no " +
+      "recognized ecosystem manifest). Add a verifyflow.config.json to run delivery checks.";
+    notes.push(reason);
+    return {
+      level,
+      steps,
+      notes,
+      environmentUnknown: { reason },
+      escalationRecommended: recommendEscalation(level, criteria, pr),
+    };
+  }
+
   cfg.setup.forEach((command, i) =>
     steps.push({
       id: `setup-${i + 1}`,
