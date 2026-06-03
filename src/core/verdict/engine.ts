@@ -9,33 +9,12 @@ import type {
 } from "../../types.js";
 import type { LlmClient } from "../../backends/llm.js";
 import { extractJson } from "../../util/json.js";
+import { looksLikeHarnessError } from "../../util/harnessError.js";
 
 export interface VerdictOutput {
   criterionResults: CriterionResult[];
   runVerdict: RunVerdict;
   summary: string;
-}
-
-/**
- * Signatures that mean the PROBE or its environment is broken — not the product. A command
- * that errors this way proves nothing about the PR, so it must never be scored as a product
- * `fail`. Observed in dogfooding (IN-545): a malformed `uv run d=$(…)` probe ran the system
- * binary and produced "unrecognized arguments" / argparse usage dumps; `python3 -m pytest`
- * without the project env produced "No module named pytest".
- */
-const HARNESS_ERROR_SIGNATURES = [
-  /\bcommand not found\b/i,
-  /\bno such file or directory\b/i,
-  /\bfailed to spawn\b/i,
-  /\bunrecognized arguments\b/i,
-  /\bno module named\b/i,
-  /\bmodulenotfounderror\b/i,
-  /^usage:/im,
-  /\berror: failed to\b/i,
-];
-
-function looksLikeHarnessError(text: string): boolean {
-  return HARNESS_ERROR_SIGNATURES.some((re) => re.test(text));
 }
 
 /**
