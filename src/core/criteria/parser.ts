@@ -51,28 +51,58 @@ export async function parseCriteria(
   return { criteria, ticketQualityIssues };
 }
 
-/** Find the "Acceptance Criteria" section and split it into quoted bullet criteria. */
+/** Headings that introduce an acceptance-criteria / requirements section (IN-558). */
+const CRITERIA_HEADING = /^#{1,6}\s*(acceptance\s+criteria|acceptance\s+tests|requirements?)\b/i;
+const BULLET = /^(?:[-*•]|\d+[.)])\s+(.*)$/;
+/** Normative cues that mark a sentence as a testable requirement, not prose. */
+const NORMATIVE = /\b(must|should|shall|prints?|returns?|exits?|displays?|outputs?|supports?|accepts?|rejects?|emits?|raises?)\b/i;
+
+function criterion(text: string, index: number): Criterion {
+  return { id: `AC-${index + 1}`, text, source: "linear_explicit", method: "backend", observable: true };
+}
+
+/**
+ * Extract explicit, ticket-quoted criteria.
+ *
+ * Primary path: a recognized criteria/requirements heading → its bullet/numbered items
+ * (verbatim). Fallback (IN-558): when no such heading exists, recover testable requirements
+ * from the body — bullets that carry a normative cue or an inline-code command, plus
+ * must/should/shall sentences — so requirements stated as numbered feature points or prose are
+ * not silently dropped when the LLM is unavailable.
+ */
 export function extractExplicitCriteria(issue: IssueContext): Criterion[] {
   const lines = issue.description.split(/\r?\n/);
-  const headingIdx = lines.findIndex((l) =>
-    /^#{1,6}\s*acceptance\s+criteria\b/i.test(l.trim()),
-  );
-  if (headingIdx === -1) return [];
+  const headingIdx = lines.findIndex((l) => CRITERIA_HEADING.test(l.trim()));
 
-  const out: Criterion[] = [];
-  for (let i = headingIdx + 1; i < lines.length; i++) {
-    const line = lines[i]!.trim();
-    if (/^#{1,6}\s/.test(line)) break; // next heading ends the section
-    const m = line.match(/^(?:[-*•]|\d+[.)])\s+(.*)$/);
-    if (m && m[1]!.trim().length > 0) {
-      out.push({
-        id: `AC-${out.length + 1}`,
-        text: m[1]!.trim(),
-        source: "linear_explicit",
-        method: "backend",
-        observable: true,
-      });
+  if (headingIdx !== -1) {
+    const out: Criterion[] = [];
+    for (let i = headingIdx + 1; i < lines.length; i++) {
+      const line = lines[i]!.trim();
+      if (/^#{1,6}\s/.test(line)) break; // next heading ends the section
+      const m = line.match(BULLET);
+      if (m && m[1]!.trim().length > 0) out.push(criterion(m[1]!.trim(), out.length));
     }
+    return out;
+  }
+
+  return extractNormative(lines);
+}
+
+/** Fallback extractor for tickets with no explicit acceptance-criteria heading. */
+function extractNormative(lines: string[]): Criterion[] {
+  const out: Criterion[] = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || /^#{1,6}\s/.test(line)) continue; // skip blanks and headings
+    const bullet = line.match(BULLET);
+    const text = (bullet ? bullet[1]! : line).trim();
+    if (text.length < 8) continue;
+    const hasCode = /`[^`]+`/.test(text);
+    const normative = NORMATIVE.test(text);
+    // Bullets count when they look testable (cue or command); plain prose only with a strong cue.
+    const keep = bullet ? normative || hasCode : normative;
+    if (keep) out.push(criterion(text, out.length));
+    if (out.length >= 12) break;
   }
   return out;
 }
