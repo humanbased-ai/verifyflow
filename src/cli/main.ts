@@ -3,7 +3,7 @@ import path from "node:path";
 import { runVerification, type PipelineDeps } from "../core/pipeline.js";
 import type { Level, Policy, RunRequest } from "../types.js";
 import { GhCliClient, FixtureGithubClient, parsePrRef } from "../core/context/github.js";
-import { FixtureLinearClient, LinearApiClient } from "../core/context/linear.js";
+import { FixtureLinearClient, LinearApiClient, type LinearClient } from "../core/context/linear.js";
 import { ClaudeCliClient } from "../backends/claudeCli.js";
 import { FallbackLlm } from "../backends/fallbackLlm.js";
 import type { LlmClient } from "../backends/llm.js";
@@ -29,7 +29,8 @@ Options:
   --workdir <dir>        Existing checkout of the target repo to execute against.
   --checkout             Clone the repo and check out the PR head (live execution).
   --fixtures <dir>       Offline mode: read issue.json / pr.json from <dir>.
-  --comment              Post the markdown report as a PR comment (live only).
+  --comment              Post the markdown report as a PR comment (live only; updates in place).
+  --linear-writeback     Post the delivery verdict back to the linked Linear issue (live only).
   -h, --help             Show this help.
 
 Auth model: VerifyFlow stores no secrets. It uses the authorized CLIs you have installed —
@@ -88,7 +89,8 @@ async function cmdRun(args: Args): Promise<number> {
   const fixtures = str(args.fixtures);
 
   // Build context clients.
-  let linear, github;
+  let linear: LinearClient;
+  let github;
   if (fixtures) {
     const dir = path.resolve(fixtures);
     linear = new FixtureLinearClient(dir);
@@ -155,7 +157,15 @@ async function cmdRun(args: Args): Promise<number> {
 
   if (args.comment && !fixtures) {
     const ok = await postPrComment(report, renderMarkdown(report));
-    console.error(ok ? "[verifyflow] posted PR comment." : "[verifyflow] failed to post PR comment.");
+    console.error(ok ? "[verifyflow] posted/updated PR comment." : "[verifyflow] failed to post PR comment.");
+  }
+
+  if (args["linear-writeback"] && !fixtures && linear.addComment) {
+    const ok = await linear.addComment(
+      report.issue.key,
+      `VerifyFlow delivery verdict: **${report.runVerdict}**. ${report.summary}`,
+    );
+    console.error(ok ? "[verifyflow] posted Linear comment." : "[verifyflow] failed to post Linear comment.");
   }
 
   if (report.gate?.blocked) return 1;

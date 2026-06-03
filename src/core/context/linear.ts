@@ -4,6 +4,8 @@ import type { IssueContext, PrContext } from "../../types.js";
 
 export interface LinearClient {
   loadIssue(key: string): Promise<IssueContext>;
+  /** Optional write-back (IN-560): post a comment on the issue. Present only on the live client. */
+  addComment?(issueKey: string, body: string): Promise<boolean>;
 }
 
 /** Reads a recorded Linear issue fixture: <dir>/issue.json. */
@@ -26,28 +28,53 @@ export class FixtureLinearClient implements LinearClient {
 export class LinearApiClient implements LinearClient {
   constructor(private readonly apiKey: string) {}
 
-  async loadIssue(key: string): Promise<IssueContext> {
-    const query = `query($id:String!){ issue(id:$id){ identifier title description url state{ name } } }`;
+  private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     const resp = await fetch("https://api.linear.app/graphql", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: this.apiKey },
-      body: JSON.stringify({ query, variables: { id: key } }),
+      body: JSON.stringify({ query, variables }),
     });
     if (!resp.ok) throw new Error(`Linear API ${resp.status}: ${await resp.text()}`);
-    const body = (await resp.json()) as {
-      data?: { issue?: { identifier: string; title: string; description: string; url: string; state?: { name: string } } };
-      errors?: unknown;
-    };
-    const issue = body.data?.issue;
-    if (!issue) throw new Error(`Linear issue ${key} not found (${JSON.stringify(body.errors)})`);
+    const body = (await resp.json()) as { data?: T; errors?: unknown };
+    if (!body.data) throw new Error(`Linear API error: ${JSON.stringify(body.errors)}`);
+    return body.data;
+  }
+
+  async loadIssue(key: string): Promise<IssueContext> {
+    const query = `query($id:String!){ issue(id:$id){ id identifier title description url state{ name } } }`;
+    const data = await this.graphql<{
+      issue?: { id: string; identifier: string; title: string; description: string; url: string; state?: { name: string } };
+    }>(query, { id: key });
+    const issue = data.issue;
+    if (!issue) throw new Error(`Linear issue ${key} not found`);
     return {
       key: issue.identifier,
+      id: issue.id,
       title: issue.title,
       description: issue.description ?? "",
       url: issue.url,
       status: issue.state?.name,
       source: "linear-api",
     };
+  }
+
+  /** Post a comment on the issue (write-back). Resolves the UUID first, then commentCreate. */
+  async addComment(issueKey: string, body: string): Promise<boolean> {
+    try {
+      const data = await this.graphql<{ issue?: { id: string } }>(
+        `query($id:String!){ issue(id:$id){ id } }`,
+        { id: issueKey },
+      );
+      const uuid = data.issue?.id;
+      if (!uuid) return false;
+      const res = await this.graphql<{ commentCreate?: { success: boolean } }>(
+        `mutation($issueId:String!,$body:String!){ commentCreate(input:{issueId:$issueId,body:$body}){ success } }`,
+        { issueId: uuid, body },
+      );
+      return res.commentCreate?.success === true;
+    } catch {
+      return false;
+    }
   }
 }
 

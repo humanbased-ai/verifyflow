@@ -69,6 +69,8 @@ export interface RunRequest {
 /** Linear issue context — the PRIMARY source of truth for acceptance criteria. */
 export interface IssueContext {
   key: string;
+  /** Linear's internal UUID, when known (used for write-back; identifiers also work). */
+  id?: string;
   title: string;
   description: string;
   url: string;
