@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { run } from "../../util/exec.js";
-import type { RunReport } from "../../types.js";
+import type { Evidence, RunReport } from "../../types.js";
 
 const EMOJI: Record<string, string> = {
   pass: "✅",
@@ -10,6 +10,20 @@ const EMOJI: Record<string, string> = {
   blocked: "🚧",
   not_evaluable: "❓",
 };
+
+const EVIDENCE_ICON: Partial<Record<Evidence["type"], string>> = {
+  screenshot: "🖼️",
+  video: "🎬",
+  browser_trace: "🔍",
+  test_report: "🧪",
+};
+
+/** Render one evidence reference for the report table, with a type hint for visual artifacts. */
+function renderEvidenceRef(e: Evidence): string {
+  const ref = e.path ?? e.ref ?? e.type;
+  const icon = EVIDENCE_ICON[e.type];
+  return icon ? `${icon} \`${ref}\`` : `\`${ref}\``;
+}
 
 export function renderMarkdown(report: RunReport): string {
   const r = report;
@@ -37,7 +51,7 @@ export function renderMarkdown(report: RunReport): string {
   lines.push(`| # | Criterion | Result | Method | Evidence |`);
   lines.push(`| --- | --- | --- | --- | --- |`);
   for (const c of r.criterionResults) {
-    const ev = c.evidence.map((e) => `\`${e.path ?? e.ref ?? e.type}\``).join("<br>") || "—";
+    const ev = c.evidence.map(renderEvidenceRef).join("<br>") || "—";
     lines.push(
       `| ${c.criterionId} | ${escapePipes(c.criterion)} | ${EMOJI[c.result] ?? ""} ${c.result} | ${c.method} | ${ev} |`,
     );

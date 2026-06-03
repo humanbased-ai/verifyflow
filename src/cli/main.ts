@@ -23,7 +23,8 @@ Options:
   --linear <KEY|url>     Linear issue (PRIMARY source of acceptance criteria).
                          If omitted, VerifyFlow derives it from the PR body's Linear link.
   --pr <ref>             GitHub PR URL, owner/repo#N, or #N.
-  --level <level>        functional (only supported level today), ui, journey.
+  --level <level>        functional | ui (browser-driven). journey not yet implemented.
+  --base-url <url>       Base URL of the running app for ui-level browser checks.
   --policy <p>           advisory (default, never blocks) | merge_gate (blocks on needs_fix)
                          | strict (also blocks on manual_review_required / accept_with_risks).
   --backend <name>       Label recorded in the report (default: the LLM backend name).
@@ -83,8 +84,8 @@ async function cmdRun(args: Args): Promise<number> {
     console.error(USAGE);
     return 2;
   }
-  if (level !== "functional") {
-    console.error(`error: level "${level}" is not implemented yet (only "functional").`);
+  if (level !== "functional" && level !== "ui") {
+    console.error(`error: level "${level}" is not implemented yet (functional, ui).`);
     return 2;
   }
 
@@ -142,6 +143,7 @@ async function cmdRun(args: Args): Promise<number> {
     backend: str(args.backend),
     outputRoot,
     workdir: workdir ? path.resolve(workdir) : undefined,
+    baseUrl: str(args["base-url"]),
     sandbox: !args["no-sandbox"],
   };
 

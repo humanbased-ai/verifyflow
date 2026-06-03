@@ -68,6 +68,8 @@ export interface RunRequest {
   fixtureDir?: string;
   /** Working directory containing a checkout of the target repo (live runs). */
   workdir?: string;
+  /** Base URL of the running app for level=ui browser checks (IN-559). */
+  baseUrl?: string;
   /** Strip host secrets from the env handed to executed commands (IN-555). Default true. */
   sandbox?: boolean;
   /** Where artifacts, reports, events and memory are written. */
