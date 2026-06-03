@@ -68,7 +68,7 @@ export async function runVerification(
 
   const results: HarnessResult[] = [];
   if (req.workdir) {
-    const runner = new CommandRunner(req.workdir, artifactRoot);
+    const runner = new CommandRunner(req.workdir, artifactRoot, { isolate: req.sandbox !== false });
     for (const step of plan.steps) {
       results.push(await runner.runStep(step));
       // Stop spending on probes/tests if environment setup failed hard.
