@@ -65,6 +65,11 @@ export async function decideVerdict(
 
   if (await llm.available()) {
     try {
+      await reviewSubstringMisses(criteria, criterionResults, byStep, llm);
+    } catch {
+      /* keep the parked not_evaluable when the model is unavailable/unparsable */
+    }
+    try {
       await applyLlmJudgment(criteria, criterionResults, results, llm);
     } catch {
       /* keep rule-based results when the model is unavailable/unparsable */
@@ -178,13 +183,31 @@ function evaluateCriterion(
         failureCategory: "insufficient_evidence",
       };
     }
+    // Exit 0 but the ticket-derived expected substring missed (IN-545 PR#154 second false-fail
+    // form): the command itself SUCCEEDED — only the heuristically-extracted expectation went
+    // unmatched, and that extraction can be wrong (e.g. the criterion's second code span is
+    // another command name, not an output template). Weak evidence: park as not_evaluable here;
+    // `reviewSubstringMisses` resolves it to pass/fail from the actual output when an LLM is
+    // available, and without one it stays escalated to a human instead of a false `fail`.
+    if (exitOk) {
+      return {
+        ...base,
+        result: "not_evaluable",
+        reason:
+          `${reason} The command succeeded (exit 0), so the unmatched text may be a ` +
+          `mis-extracted expectation rather than a product failure — needs semantic or manual review.`,
+        evidence: probe.evidence,
+        confidence: 0.45,
+        failureCategory: "insufficient_evidence",
+      };
+    }
     return {
       ...base,
       result: "fail",
       reason,
       evidence: probe.evidence,
       confidence: 0.85,
-      failureCategory: exitOk ? "backend_functionality" : "missing_implementation",
+      failureCategory: "missing_implementation",
     };
   }
 
@@ -276,6 +299,66 @@ function buildSummary(
     s += ` Escalation recommended to ${plan.escalationRecommended.toLevel}: ${plan.escalationRecommended.reason}.`;
   }
   return s;
+}
+
+/**
+ * Semantic resolution of exit-0 substring misses (IN-545 PR#154 false-fail fix).
+ *
+ * A ticket-derived probe that exited 0 but missed its heuristically-extracted expected
+ * substring was parked as `not_evaluable` by the rules. This focused, per-criterion review
+ * hands the ACTUAL output and the criterion text to the LLM: a clear demonstration upgrades
+ * to `pass` (capped confidence — the evidence is the real output, the call only reads it),
+ * a clear violation lands `fail` (the probe is authoritative: ticket-quoted, executed, no
+ * harness-error signature). No parsable signal → stays parked for a human.
+ */
+async function reviewSubstringMisses(
+  criteria: CriteriaModel,
+  results: CriterionResult[],
+  byStep: Map<string, HarnessResult>,
+  llm: LlmClient,
+): Promise<void> {
+  for (const c of criteria.criteria) {
+    if (!c.probe?.fromTicket || !c.probe.expectSubstring) continue;
+    const probe = byStep.get(`probe-${c.id}`);
+    if (!probe || !probe.executed || probe.timedOut || probe.exitCode !== 0) continue;
+    const out = probe.stdout + "\n" + probe.stderr;
+    if (out.includes(c.probe.expectSubstring)) continue;
+    const r = results.find((x) => x.criterionId === c.id);
+    if (!r || r.result !== "not_evaluable") continue;
+
+    const system =
+      "You are VerifyFlow's semantic output reviewer. A probe command ran successfully " +
+      "(exit 0) but its output did not contain a heuristically-extracted expected substring — " +
+      "that extraction is often wrong (e.g. it may be another command name from the criterion " +
+      "text, not an output template). Decide from the ACTUAL OUTPUT whether the acceptance " +
+      "criterion is satisfied. Be skeptical: satisfied=true only when the output clearly " +
+      'demonstrates the criterion. JSON only: {"satisfied": true|false, "reason": "..."}.';
+    const prompt = [
+      `Acceptance criterion: ${c.text}`,
+      `Probe command: ${probe.command}`,
+      `Heuristic expected substring (possibly mis-extracted): "${c.probe.expectSubstring}"`,
+      "Actual output:",
+      out.slice(0, 1500),
+    ].join("\n");
+    const raw = await llm.complete({ system, prompt, task: "substring-semantic-review" });
+    const parsed = extractJson<{ satisfied?: boolean; reason?: string }>(raw);
+    if (parsed.satisfied === true) {
+      r.result = "pass";
+      r.confidence = 0.78;
+      r.failureCategory = undefined;
+      r.reason =
+        `Ran \`${probe.command}\`: exit 0. Expected-substring heuristic missed, but semantic ` +
+        `review of the actual output confirms the criterion${parsed.reason ? `: ${parsed.reason}` : "."}`;
+    } else if (parsed.satisfied === false) {
+      r.result = "fail";
+      r.confidence = 0.8;
+      r.failureCategory = "backend_functionality";
+      r.reason =
+        `Ran \`${probe.command}\`: exit 0, but semantic review of the actual output finds the ` +
+        `criterion NOT satisfied${parsed.reason ? `: ${parsed.reason}` : "."}`;
+    }
+    // No parsable signal (e.g. deterministic fallback returns {}): stays not_evaluable.
+  }
 }
 
 interface LlmVerdictAdj {
