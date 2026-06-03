@@ -1,0 +1,203 @@
+diff --git a/prd.md b/prd.md
+index cfd257bc87..706ed4fabe 100644
+--- a/prd.md
++++ b/prd.md
+@@ -688,6 +688,15 @@ inside repository files.
+   writability, logs root, and status API address before users run a live poll.
+ - `symphony run` is the clear long-term command for the daemon while the legacy
+   `symphony WORKFLOW.md --once/--check` invocation remains compatible.
++- `symphony info` (alias `sy info`) prints read-only environment diagnostics:
++  the Symphony version with the running Python and OS platform, plus the
++  resolved `WORKFLOW.md` path, configured `agent.runner`, and `tracker.kind`.
++  It accepts an optional `workflow_path` positional (default `./WORKFLOW.md`)
++  and a `--json` flag that emits the same six fields (`version`, `python`,
++  `platform`, `workflow_path`, `runner`, `tracker`) as one JSON object. A
++  missing or unparseable workflow reports `not found` for the workflow fields
++  instead of crashing, in either output mode. The command makes no network
++  calls and never touches the orchestrator, polling, or dispatch paths.
+ - Package first through normal Python CLI channels (`uv tool install`, `pipx`,
+   and release artifacts). Native single-file binaries and Homebrew are follow-on
+   distribution channels once the command surface stabilizes.
+diff --git a/symphony/cli.py b/symphony/cli.py
+index f2af4234ba..2af5a688d8 100644
+--- a/symphony/cli.py
++++ b/symphony/cli.py
+@@ -6,6 +6,7 @@
+ import logging
+ import logging.handlers
+ import os
++import platform
+ import re
+ import secrets
+ import shlex
+@@ -391,6 +392,26 @@ def build_doctor_parser() -> argparse.ArgumentParser:
+     return parser
+ 
+ 
++def build_info_parser() -> argparse.ArgumentParser:
++    parser = argparse.ArgumentParser(
++        prog=f"{_cli_name()} info",
++        description="Print Symphony version, platform, and workflow diagnostics.",
++    )
++    _add_version_argument(parser)
++    parser.add_argument(
++        "workflow_path",
++        nargs="?",
++        default=DEFAULT_WORKFLOW_PATH,
++        help="Path to repository WORKFLOW.md. Defaults to ./WORKFLOW.md.",
++    )
++    parser.add_argument(
++        "--json",
++        action="store_true",
++        help="Emit the diagnostics as a single JSON object instead of text.",
++    )
++    return parser
++
++
+ def _add_version_argument(parser: argparse.ArgumentParser) -> None:
+     parser.add_argument(
+         "--version",
+@@ -940,6 +961,8 @@ def main(argv: Sequence[str] | None = None) -> int:
+             return onboard_main(raw_args[1:])
+         if command == "doctor":
+             return doctor_main(raw_args[1:])
++        if command == "info":
++            return info_main(raw_args[1:])
+         if command == "run":
+             return run_main(raw_args[1:])
+         if command == "webhooks":
+@@ -1801,6 +1824,53 @@ def doctor_checks(
+     return checks
+ 
+ 
++def info_main(argv: Sequence[str] | None = None) -> int:
++    parser = build_info_parser()
++    args = parser.parse_args(argv)
++
++    info = gather_info(args.workflow_path)
++
++    if args.json:
++        import json
++
++        print(json.dumps(info))
++        return 0
++
++    print(f"Symphony {info['version']} — Python {info['python']} on {info['platform']}")
++    print(f"Workflow: {info['workflow_path']}")
++    print(f"Runner:   {info['runner']}")
++    print(f"Tracker:  {info['tracker']}")
++    return 0
++
++
++def gather_info(workflow_path: str | Path) -> dict[str, str]:
++    """Collect environment diagnostics for the ``info`` command.
++
++    Workflow fields fall back to ``not found`` when WORKFLOW.md is missing or
++    cannot be parsed, so neither output mode crashes on a misconfigured repo.
++    """
++    info: dict[str, str] = {
++        "version": __version__,
++        "python": platform.python_version(),
++        "platform": sys.platform,
++        "workflow_path": "not found",
++        "runner": "not found",
++        "tracker": "not found",
++    }
++
++    workflow_file = Path(workflow_path).expanduser()
++    try:
++        definition = load_workflow(workflow_file)
++        config = definition.typed_config(workflow_path=workflow_file)
++    except (WorkflowError, ConfigError):
++        return info
++
++    info["workflow_path"] = str(workflow_file.resolve())
++    info["runner"] = config.agent.runner
++    info["tracker"] = config.tracker.kind
++    return info
++
++
+ def build_webhooks_parser() -> argparse.ArgumentParser:
+     cli = _cli_name()
+     parser = argparse.ArgumentParser(
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 16c521aefb..853508b2a5 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1147,5 +1147,76 @@ def test_run_skips_wizard_when_workflow_missing_in_non_tty(self):
+         self.assertEqual(2, raised.exception.code)
+ 
+ 
++class InfoCommandTests(unittest.TestCase):
++    _WORKFLOW = """---
++tracker:
++  kind: linear
++  project_slug: symphony-ai-agent-orchestration
++agent:
++  runner: claude_code
++---
++Body
++"""
++
++    def test_info_text_prints_three_sections(self):
++        with tempfile.TemporaryDirectory() as temp_dir:
++            workflow_path = Path(temp_dir) / "WORKFLOW.md"
++            workflow_path.write_text(self._WORKFLOW, encoding="utf-8")
++
++            out = StringIO()
++            with redirect_stdout(out):
++                exit_code = main(["info", str(workflow_path)])
++
++            output = out.getvalue()
++            self.assertEqual(0, exit_code)
++            self.assertIn(f"Symphony {__version__}", output)
++            self.assertIn(str(workflow_path.resolve()), output)
++            self.assertIn("claude_code", output)
++            self.assertIn("linear", output)
++
++    def test_info_json_emits_six_keys(self):
++        import json
++
++        with tempfile.TemporaryDirectory() as temp_dir:
++            workflow_path = Path(temp_dir) / "WORKFLOW.md"
++            workflow_path.write_text(self._WORKFLOW, encoding="utf-8")
++
++            out = StringIO()
++            with redirect_stdout(out):
++                exit_code = main(["info", str(workflow_path), "--json"])
++
++            self.assertEqual(0, exit_code)
++            payload = json.loads(out.getvalue())
++            self.assertEqual(
++                {"version", "python", "platform", "workflow_path", "runner", "tracker"},
++                set(payload),
++            )
++            self.assertEqual(__version__, payload["version"])
++            self.assertEqual("claude_code", payload["runner"])
++            self.assertEqual("linear", payload["tracker"])
++            self.assertEqual(str(workflow_path.resolve()), payload["workflow_path"])
++
++    def test_info_missing_workflow_does_not_crash(self):
++        import json
++
++        with tempfile.TemporaryDirectory() as temp_dir:
++            missing = Path(temp_dir) / "WORKFLOW.md"
++
++            text_out = StringIO()
++            with redirect_stdout(text_out):
++                text_code = main(["info", str(missing)])
++            self.assertEqual(0, text_code)
++            self.assertIn("not found", text_out.getvalue())
++
++            json_out = StringIO()
++            with redirect_stdout(json_out):
++                json_code = main(["info", str(missing), "--json"])
++            self.assertEqual(0, json_code)
++            payload = json.loads(json_out.getvalue())
++            self.assertEqual("not found", payload["workflow_path"])
++            self.assertEqual("not found", payload["runner"])
++            self.assertEqual("not found", payload["tracker"])
++
++
+ if __name__ == "__main__":
+     unittest.main()

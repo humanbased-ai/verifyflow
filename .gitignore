@@ -4,10 +4,12 @@ dist/
 
 # VerifyFlow run output (artifacts, reports, event logs, memory)
 .verifyflow/
+.verifyflow-*/
 artifacts/
 
 # Local clones of target repos used for live dogfood runs
 .targets/
+.vf-workdir/
 
 # Editor
 .idea/
