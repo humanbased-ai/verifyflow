@@ -78,6 +78,13 @@ export interface RunRequest {
    * VerifyFlow itself never gates on it (IN-569: timing is owned by the caller).
    */
   crosscheckVerdict?: string;
+  /**
+   * Degraded no-ticket mode (IN-570, opt-in via --allow-no-ticket): when no Linear issue
+   * can be resolved, verify against the PR's own title/description instead of erroring.
+   * The PR claiming its own success is no independent acceptance source, so the verdict
+   * is capped at manual_review_required and the report is stamped accordingly.
+   */
+  allowNoTicket?: boolean;
   /** Where artifacts, reports, events and memory are written. */
   outputRoot: string;
 }
