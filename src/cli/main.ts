@@ -22,7 +22,8 @@ Options:
                          If omitted, VerifyFlow derives it from the PR body's Linear link.
   --pr <ref>             GitHub PR URL, owner/repo#N, or #N.
   --level <level>        functional (only supported level today), ui, journey.
-  --policy <p>           advisory (default) | merge_gate.
+  --policy <p>           advisory (default, never blocks) | merge_gate (blocks on needs_fix)
+                         | strict (also blocks on manual_review_required / accept_with_risks).
   --backend <name>       Label recorded in the report (default: the LLM backend name).
   --model <m>            Model for the claude CLI backend.
   --out <dir>            Output root for reports/artifacts/memory (default: ./.verifyflow).
@@ -86,6 +87,10 @@ async function cmdRun(args: Args): Promise<number> {
 
   const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
   const policy = (str(args.policy) ?? "advisory") as Policy;
+  if (!["advisory", "merge_gate", "strict"].includes(policy)) {
+    console.error(`error: unknown --policy "${policy}" (expected advisory | merge_gate | strict).`);
+    return 2;
+  }
   const fixtures = str(args.fixtures);
 
   // Build context clients.
