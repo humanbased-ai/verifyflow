@@ -30,6 +30,7 @@ Options:
   --checkout             Clone the repo and check out the PR head (live execution).
   --fixtures <dir>       Offline mode: read issue.json / pr.json from <dir>.
   --comment              Post the markdown report as a PR comment (live only).
+  --no-sandbox           Pass host env (incl. secrets) to probes. Default: strip secrets.
   -h, --help             Show this help.
 
 Auth model: VerifyFlow stores no secrets. It uses the authorized CLIs you have installed —
@@ -132,6 +133,7 @@ async function cmdRun(args: Args): Promise<number> {
     backend: str(args.backend),
     outputRoot,
     workdir: workdir ? path.resolve(workdir) : undefined,
+    sandbox: !args["no-sandbox"],
   };
 
   const deps: PipelineDeps = {

@@ -74,7 +74,7 @@ export async function runVerification(
 
   const results: HarnessResult[] = [];
   if (req.workdir) {
-    const runner = new CommandRunner(req.workdir, artifactRoot);
+    const runner = new CommandRunner(req.workdir, artifactRoot, { isolate: req.sandbox !== false });
     for (const step of plan.steps) {
       if (step.id.startsWith("probe-")) {
         const criterionText = criteria.criteria.find((c) => c.id === step.criterionIds[0])?.text;

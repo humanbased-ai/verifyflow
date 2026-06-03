@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { run } from "../util/exec.js";
+import { sanitizeEnv } from "./sandbox.js";
 import type { Evidence, HarnessResult, PlanStep } from "../types.js";
 
 /**
@@ -21,14 +22,22 @@ const DEFAULT_TIMEOUTS: CommandRunnerTimeouts = {
   defaultMs: 180_000,
 };
 
+export interface CommandRunnerOptions {
+  timeouts?: Partial<CommandRunnerTimeouts>;
+  /** When true (default), strip host secrets from the env handed to commands (IN-555). */
+  isolate?: boolean;
+}
+
 export class CommandRunner {
   private readonly timeouts: CommandRunnerTimeouts;
+  private readonly isolate: boolean;
   constructor(
     private readonly workdir: string,
     private readonly artifactRoot: string,
-    timeouts: Partial<CommandRunnerTimeouts> = {},
+    opts: CommandRunnerOptions = {},
   ) {
-    this.timeouts = { ...DEFAULT_TIMEOUTS, ...timeouts };
+    this.timeouts = { ...DEFAULT_TIMEOUTS, ...opts.timeouts };
+    this.isolate = opts.isolate ?? true;
   }
 
   private timeoutFor(stepId: string): number {
@@ -61,6 +70,7 @@ export class CommandRunner {
     const res = await run("sh", ["-c", step.command], {
       cwd,
       timeoutMs: this.timeoutFor(step.id),
+      env: sanitizeEnv(process.env, this.isolate),
     });
 
     await fs.mkdir(this.artifactRoot, { recursive: true });
