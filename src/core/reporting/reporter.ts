@@ -64,6 +64,36 @@ export function renderMarkdown(report: RunReport): string {
   }
   lines.push("");
 
+  // Evidence excerpts (IN-579): artifacts live on the runner's disk, which a PR reviewer
+  // cannot reach — inline the captured output in collapsed blocks, deduped by artifact path.
+  const excerpted = new Map<string, { evidence: Evidence; criterionIds: string[] }>();
+  for (const c of r.criterionResults) {
+    for (const e of c.evidence) {
+      if (!e.excerpt || !e.path) continue;
+      const entry = excerpted.get(e.path);
+      if (entry) {
+        if (!entry.criterionIds.includes(c.criterionId)) entry.criterionIds.push(c.criterionId);
+      } else {
+        excerpted.set(e.path, { evidence: e, criterionIds: [c.criterionId] });
+      }
+    }
+  }
+  if (excerpted.size) {
+    lines.push("### Evidence excerpts");
+    lines.push("");
+    for (const [p, { evidence, criterionIds }] of excerpted) {
+      lines.push(`<details><summary><code>${p}</code> — ${criterionIds.join(", ")}</summary>`);
+      lines.push("");
+      lines.push("```text");
+      // A stray ``` in the output would break out of the fence — soften it.
+      lines.push(evidence.excerpt!.replace(/```/g, "`​``").trimEnd());
+      lines.push("```");
+      lines.push("");
+      lines.push("</details>");
+    }
+    lines.push("");
+  }
+
   if (r.plan.escalationRecommended) {
     lines.push(
       `> ⚠️ Escalation recommended to **${r.plan.escalationRecommended.toLevel}**: ${r.plan.escalationRecommended.reason}`,
