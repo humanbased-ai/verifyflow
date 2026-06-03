@@ -157,6 +157,7 @@ export async function runVerification(
       platform: process.platform,
       workdir: req.workdir ?? "(none — no execution)",
       repoConfig: repoConfigSource,
+      ...(req.crosscheckVerdict ? { crosscheckVerdict: req.crosscheckVerdict } : {}),
     },
     startedAt,
     finishedAt,

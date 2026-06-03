@@ -72,6 +72,12 @@ export interface RunRequest {
   baseUrl?: string;
   /** Strip host secrets from the env handed to executed commands (IN-555). Default true. */
   sandbox?: boolean;
+  /**
+   * Crosscheck review verdict (APPROVE | NEEDS WORK | BLOCK) handed in by the caller
+   * (Symphony invokes VerifyFlow after Crosscheck). Recorded in the report for traceability;
+   * VerifyFlow itself never gates on it (IN-569: timing is owned by the caller).
+   */
+  crosscheckVerdict?: string;
   /** Where artifacts, reports, events and memory are written. */
   outputRoot: string;
 }
