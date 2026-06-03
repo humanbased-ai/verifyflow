@@ -5,6 +5,45 @@ import type { CriterionResultValue, FailureCategory, Probe, TestPoint } from "..
 const slug = (repo: string) => repo.replace(/[^a-zA-Z0-9._-]+/g, "_");
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
+/** Minimum token-set similarity for a fuzzy memory reuse (IN-553). Tuned to reuse rewordings
+ * of the same criterion while rejecting genuinely different ones. */
+export const MEMORY_MATCH_THRESHOLD = 0.6;
+
+const MATCH_STOPWORDS = new Set([
+  "the", "and", "for", "are", "not", "with", "that", "this", "when", "then", "should",
+  "must", "via", "from", "into", "its", "a", "an", "is", "it", "of", "to", "in", "on",
+]);
+
+/** Crude singular stem so "prints"/"print" and "exits"/"exit" compare equal. */
+function stem(t: string): string {
+  return t.length > 3 && t.endsWith("s") ? t.slice(0, -1) : t;
+}
+
+/** Significant lowercase tokens (length > 2, minus stopwords, lightly stemmed). */
+function tokens(s: string): Set<string> {
+  return new Set(
+    norm(s)
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 2 && !MATCH_STOPWORDS.has(t))
+      .map(stem),
+  );
+}
+
+/** Jaccard similarity of two token sets: |A∩B| / |A∪B|, in [0,1]. */
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+
+export interface TestPointMatch {
+  point: TestPoint;
+  /** 1 for an exact normalized-text match; otherwise the fuzzy similarity score. */
+  score: number;
+  exact: boolean;
+}
+
 interface FailureModeRecord {
   category: FailureCategory;
   component: string;
@@ -35,11 +74,43 @@ export class MemoryStore {
     }
   }
 
-  /** Find a previously-stored probe for an equivalent criterion (the "feed-back" mechanism). */
-  async matchTestPoint(repo: string, criterionText: string): Promise<TestPoint | undefined> {
+  /**
+   * Find a previously-stored probe for an equivalent criterion (the "feed-back" mechanism).
+   *
+   * Exact normalized-text match wins; otherwise the highest token-set similarity above
+   * MEMORY_MATCH_THRESHOLD is reused (IN-553) — so a reworded-but-equivalent criterion still
+   * reuses its probe instead of re-deriving from scratch, while a genuinely different criterion
+   * does not false-match. When `component` is given, same-component points are preferred.
+   */
+  async matchTestPoint(repo: string, criterionText: string, component?: string): Promise<TestPoint | undefined> {
+    return (await this.matchTestPointDetailed(repo, criterionText, component))?.point;
+  }
+
+  /** Like matchTestPoint, but also returns the match score (for reuse-rate logging). */
+  async matchTestPointDetailed(
+    repo: string,
+    criterionText: string,
+    component?: string,
+  ): Promise<TestPointMatch | undefined> {
     const points = await this.loadTestPoints(repo);
+    if (points.length === 0) return undefined;
+
     const target = norm(criterionText);
-    return points.find((p) => norm(p.criterionText) === target);
+    const exact = points.find((p) => norm(p.criterionText) === target);
+    if (exact) return { point: exact, score: 1, exact: true };
+
+    const tt = tokens(criterionText);
+    let best: TestPoint | undefined;
+    let bestScore = 0;
+    for (const p of points) {
+      let s = jaccard(tt, tokens(p.criterionText));
+      if (component && p.component === component) s += 0.05; // gentle same-component preference
+      if (s > bestScore) {
+        bestScore = s;
+        best = p;
+      }
+    }
+    return best && bestScore >= MEMORY_MATCH_THRESHOLD ? { point: best, score: bestScore, exact: false } : undefined;
   }
 
   async upsertTestPoint(input: {
