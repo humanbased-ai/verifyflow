@@ -9,7 +9,13 @@
  */
 
 export type Level = "functional" | "ui" | "journey";
-export type Policy = "advisory" | "merge_gate";
+/**
+ * Gate strictness (IN-556):
+ *  - advisory: report only, never blocks;
+ *  - merge_gate: block only on `needs_fix` (a positively-demonstrated product failure);
+ *  - strict: also block on `manual_review_required` and `accept_with_risks`.
+ */
+export type Policy = "advisory" | "merge_gate" | "strict";
 
 /** Criterion-level verdicts (docs/evidence-schema.md). */
 export type CriterionResultValue =

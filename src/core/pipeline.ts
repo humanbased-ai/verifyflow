@@ -1,5 +1,6 @@
 import path from "node:path";
 import type {
+  CriterionResult,
   HarnessResult,
   QualityEvent,
   RunReport,
@@ -114,7 +115,7 @@ export async function runVerification(
     startedAt,
     finishedAt,
     durationMs: results.reduce((a, r) => a + r.durationMs, 0),
-    gate: gateDecision(req.policy, verdict.runVerdict),
+    gate: gateDecision(req.policy, verdict.runVerdict, verdict.criterionResults),
   };
 
   // --- Quality intelligence: persist memory + events (the "feed test points back" loop) -
@@ -137,14 +138,36 @@ function deriveComponent(pr: { changedFiles: { path: string }[] }): string {
   return parts.length > 1 ? parts.slice(0, 2).join("/") : parts[0]!;
 }
 
-function gateDecision(policy: RunRequest["policy"], verdict: RunVerdict): RunReport["gate"] {
-  if (policy !== "merge_gate") return undefined;
-  const blocked = verdict === "needs_fix" || verdict === "manual_review_required";
+/**
+ * Decide the merge gate from the policy (IN-556).
+ *  - advisory: never blocks.
+ *  - merge_gate: blocks only on `needs_fix` — a positively-demonstrated product failure. A lone
+ *    `not_evaluable` (manual_review_required) no longer hard-blocks here.
+ *  - strict: also blocks on `manual_review_required` and `accept_with_risks`.
+ * The lowest per-criterion confidence is surfaced in the reason so reviewers see how sure the
+ * verdict is without it changing the block decision.
+ */
+export function gateDecision(
+  policy: RunRequest["policy"],
+  verdict: RunVerdict,
+  criterionResults: CriterionResult[] = [],
+): RunReport["gate"] {
+  const minConfidence = criterionResults.length
+    ? Math.min(...criterionResults.map((c) => c.confidence))
+    : undefined;
+  const confNote = minConfidence !== undefined ? ` (min criterion confidence ${minConfidence.toFixed(2)})` : "";
+
+  if (policy === "advisory") {
+    return { blocked: false, reason: `advisory: verdict=${verdict} — reporting only, never blocks${confNote}` };
+  }
+  const blocked =
+    verdict === "needs_fix" ||
+    (policy === "strict" && (verdict === "manual_review_required" || verdict === "accept_with_risks"));
   return {
     blocked,
     reason: blocked
-      ? `policy=merge_gate and verdict=${verdict}`
-      : `verdict=${verdict} clears the gate`,
+      ? `policy=${policy} blocks on verdict=${verdict}${confNote}`
+      : `policy=${policy}: verdict=${verdict} clears the gate${confNote}`,
   };
 }
 
