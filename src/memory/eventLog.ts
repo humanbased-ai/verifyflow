@@ -17,4 +17,24 @@ export class EventLog {
     await fs.mkdir(path.dirname(this.file), { recursive: true });
     await fs.appendFile(this.file, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
   }
+
+  /** Read all appended events. Returns [] when no log exists yet. Malformed lines are skipped. */
+  async readAll(): Promise<QualityEvent[]> {
+    let raw: string;
+    try {
+      raw = await fs.readFile(this.file, "utf8");
+    } catch {
+      return [];
+    }
+    const out: QualityEvent[] = [];
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        out.push(JSON.parse(line) as QualityEvent);
+      } catch {
+        /* skip malformed line */
+      }
+    }
+    return out;
+  }
 }

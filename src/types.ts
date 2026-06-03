@@ -243,6 +243,8 @@ export interface QualityEvent {
   component?: string;
   duration_ms?: number;
   is_flaky_suspected?: boolean;
+  /** True when this criterion's probe was reused from a memory test point (reuse rate). */
+  reused?: boolean;
 }
 
 /** A persisted, reusable test point (Karpathy: keep memory, not just a score). */

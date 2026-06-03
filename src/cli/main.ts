@@ -11,11 +11,13 @@ import { MemoryStore } from "../memory/store.js";
 import { EventLog } from "../memory/eventLog.js";
 import { ensurePrCheckout } from "../harness/checkout.js";
 import { renderMarkdown, postPrComment } from "../core/reporting/reporter.js";
+import { computeMetrics, renderMetricsMarkdown } from "../core/reporting/metrics.js";
 
 const USAGE = `verifyflow — evidence-backed delivery verification
 
 Usage:
-  vf run --linear <KEY|url> --pr <url|owner/repo#N|#N> --level <functional|ui|journey> [options]
+  vf run    --linear <KEY|url> --pr <url|owner/repo#N|#N> --level <functional|ui|journey> [options]
+  vf report [--out <dir>] [--json]    Aggregate accumulated runs into quality-intelligence metrics.
 
 Options:
   --linear <KEY|url>     Linear issue (PRIMARY source of acceptance criteria).
@@ -162,6 +164,18 @@ async function cmdRun(args: Args): Promise<number> {
   return 0;
 }
 
+async function cmdReport(args: Args): Promise<number> {
+  const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
+  const events = await new EventLog(outputRoot).readAll();
+  if (events.length === 0) {
+    console.error(`[verifyflow] no events found under ${outputRoot} — run \`vf run\` first.`);
+    return 0;
+  }
+  const metrics = computeMetrics(events);
+  console.log(args.json ? JSON.stringify(metrics, null, 2) : renderMetricsMarkdown(metrics));
+  return 0;
+}
+
 async function main(): Promise<number> {
   const { cmd, args } = parseArgs(process.argv.slice(2));
   if (args.help || cmd === "" || cmd === "help") {
@@ -169,6 +183,7 @@ async function main(): Promise<number> {
     return cmd === "" ? 2 : 0;
   }
   if (cmd === "run") return cmdRun(args);
+  if (cmd === "report") return cmdReport(args);
   console.error(`unknown command: ${cmd}\n`);
   console.log(USAGE);
   return 2;
