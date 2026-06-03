@@ -17,6 +17,28 @@ export interface VerdictOutput {
 }
 
 /**
+ * Signatures that mean the PROBE or its environment is broken — not the product. A command
+ * that errors this way proves nothing about the PR, so it must never be scored as a product
+ * `fail`. Observed in dogfooding (IN-545): a malformed `uv run d=$(…)` probe ran the system
+ * binary and produced "unrecognized arguments" / argparse usage dumps; `python3 -m pytest`
+ * without the project env produced "No module named pytest".
+ */
+const HARNESS_ERROR_SIGNATURES = [
+  /\bcommand not found\b/i,
+  /\bno such file or directory\b/i,
+  /\bfailed to spawn\b/i,
+  /\bunrecognized arguments\b/i,
+  /\bno module named\b/i,
+  /\bmodulenotfounderror\b/i,
+  /^usage:/im,
+  /\berror: failed to\b/i,
+];
+
+function looksLikeHarnessError(text: string): boolean {
+  return HARNESS_ERROR_SIGNATURES.some((re) => re.test(text));
+}
+
+/**
  * Assigns criterion-level and run-level verdicts from harness evidence.
  *
  * Hard rules (docs/evidence-schema.md, prd.md):
@@ -117,6 +139,22 @@ function evaluateCriterion(
     const out = probe.stdout + "\n" + probe.stderr;
     const exitOk = probe.exitCode === 0;
     const substrOk = !probeExpectsSubstring(c) || out.includes(c.probe!.expectSubstring!);
+    // Triage before judging: a non-zero exit that carries an environment/command-error
+    // signature is the harness's own fault (bad probe, wrong interpreter, missing arg), not a
+    // product defect. Block it for manual review — never let it become a product `fail`.
+    if (!exitOk && looksLikeHarnessError(out)) {
+      return {
+        ...base,
+        result: "blocked",
+        reason:
+          `Probe \`${probe.command}\` failed with an environment/command error, not a product ` +
+          `failure (output shows a usage/spawn/module error). The check could not be executed ` +
+          `as intended and needs a corrected probe or manual review.`,
+        evidence: probe.evidence,
+        confidence: 0.5,
+        failureCategory: "environment_failure",
+      };
+    }
     if (exitOk && substrOk) {
       return {
         ...base,
@@ -270,7 +308,11 @@ async function applyLlmJudgment(
     "Crucial distinction: use `fail` ONLY when the evidence positively shows the criterion is " +
     "VIOLATED. When the evidence merely does not PROVE the criterion (e.g. an implementation " +
     "constraint like 'not hardcoded' that execution cannot demonstrate), use `not_evaluable` — " +
-    "do not punish the PR with `fail` for something that is simply unprovable by execution. JSON only.";
+    "do not punish the PR with `fail` for something that is simply unprovable by execution. " +
+    "CRITICAL: command/usage/environment errors (e.g. 'unrecognized arguments', argparse 'usage:' " +
+    "dumps, 'No module named', 'command not found', 'Failed to spawn') mean the PROBE or its " +
+    "environment is broken — NOT the product. Never base a `fail` on such output; that output is " +
+    "evidence the check did not run as intended, not evidence the PR is wrong. JSON only.";
   const evidenceExcerpts = harness.map((h) => ({
     step: h.stepId,
     command: h.command,
@@ -291,11 +333,29 @@ async function applyLlmJudgment(
     'Respond: {"adjustments":[{"id","downgradeTo","reason"}]}. Only include criteria you would change.',
   ].join("\n");
 
+  // A criterion may only be downgraded to `fail` by the reviewer when there is a clean,
+  // authoritative refutation: a ticket-quoted probe that actually executed and did NOT error
+  // with an environment/command-error signature. Otherwise the reviewer is reasoning over a
+  // broken probe (IN-545 regression) — cap any such `fail` at `not_evaluable`.
+  const byStepId = new Map(harness.map((h) => [h.stepId, h]));
+  const canFail = (id: string): boolean => {
+    const c = criteria.criteria.find((x) => x.id === id);
+    if (!c?.probe?.fromTicket) return false;
+    const probe = byStepId.get(`probe-${id}`);
+    if (!probe || !probe.executed) return false;
+    if (looksLikeHarnessError(probe.stdout + "\n" + probe.stderr)) return false;
+    return true;
+  };
+
   const raw = await llm.complete({ system, prompt, task: "verdict-review" });
   const parsed = extractJson<{ adjustments?: LlmVerdictAdj[] }>(raw);
   for (const adj of parsed.adjustments ?? []) {
     const r = results.find((x) => x.criterionId === adj.id);
     if (!r || !adj.downgradeTo) continue;
+    if (adj.downgradeTo === "fail" && !canFail(adj.id)) {
+      // Reviewer wanted a product failure off a non-authoritative/broken probe — refuse it.
+      adj.downgradeTo = "not_evaluable";
+    }
     if (rank[adj.downgradeTo] < rank[r.result]) {
       r.result = adj.downgradeTo;
       if (adj.reason) r.reason = `${r.reason} [reviewer: ${adj.reason}]`;

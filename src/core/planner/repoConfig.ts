@@ -21,17 +21,48 @@ export interface RepoConfig {
   source: string;
 }
 
+// Binaries that already resolve outside the project environment and must never be
+// prefixed with runPrefix. Note: python/python3/pytest are intentionally NOT here — in a
+// uv/poetry project they must run inside the project env (`uv run pytest`), or they pick up
+// the system interpreter and report a false failure (e.g. "No module named pytest").
 const SYSTEM_BINS = new Set([
   "sh", "bash", "env", "curl", "git", "echo", "cat", "ls", "grep",
-  "python", "python3", "node", "uv", "npm", "pnpm", "yarn", "pytest", "go", "cargo", "make",
+  "node", "uv", "npm", "pnpm", "yarn", "go", "cargo", "make",
 ]);
 
-/** Adapt a probe command to the repo by prefixing project entrypoints with runPrefix. */
+/** Shell metacharacters that make a command "compound" (more than one simple invocation). */
+const COMPOUND = /[;&|]|\$\(|`|\n|(^|\s)[A-Za-z_][A-Za-z0-9_]*=/;
+
+/** Single-quote a string for safe embedding inside a POSIX `sh -c '...'` wrapper. */
+function shQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Adapt a probe command so every project entrypoint inside it runs in the repo environment.
+ *
+ * The naive "prefix the first token" approach breaks on two real failure modes observed in
+ * dogfooding (IN-545): a compound command like `d=$(mktemp -d); symphony info "$d/..."`
+ * would get `runPrefix` glued onto the leading `d=` assignment (so the prefix runs a bogus
+ * program AND the real `symphony` call runs unprefixed against the system binary), and
+ * `python3 -m pytest` would be left unprefixed and miss the project's pytest.
+ *
+ * Fix: a compound command is wrapped whole — `<runPrefix> sh -c '<command>'` — so the
+ * project environment is active for *all* sub-commands, including assignments, pipes, and
+ * interpreters. A simple single command keeps the lightweight token prefix.
+ */
 export function adaptCommand(command: string, cfg: RepoConfig): string {
   if (!cfg.runPrefix) return command;
-  const first = command.trim().split(/\s+/)[0] ?? "";
+  const trimmed = command.trim();
+
+  if (COMPOUND.test(trimmed)) {
+    // Wrap the whole thing so symphony/python/pytest inside all resolve to the project env.
+    return `${cfg.runPrefix} sh -c ${shQuote(trimmed)}`;
+  }
+
+  const first = trimmed.split(/\s+/)[0] ?? "";
   if (SYSTEM_BINS.has(first)) return command;
-  if (command.startsWith(cfg.runPrefix)) return command;
+  if (trimmed.startsWith(cfg.runPrefix)) return command;
   return `${cfg.runPrefix} ${command}`;
 }
 
