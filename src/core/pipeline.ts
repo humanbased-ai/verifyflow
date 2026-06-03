@@ -1,6 +1,7 @@
 import path from "node:path";
 import type {
   HarnessResult,
+  PlanStep,
   QualityEvent,
   RunReport,
   RunRequest,
@@ -14,8 +15,10 @@ import { parsePrRef } from "./context/github.js";
 import { type LinearClient, linearKeyFromPr } from "./context/linear.js";
 import { parseCriteria } from "./criteria/parser.js";
 import { buildPlan } from "./planner/planner.js";
-import { loadRepoConfig } from "./planner/repoConfig.js";
+import { loadRepoConfig, type RepoConfig } from "./planner/repoConfig.js";
 import { CommandRunner } from "../harness/commandRunner.js";
+import { regenerateProbe } from "../harness/probeFix.js";
+import { looksLikeHarnessError } from "../util/harnessError.js";
 import { decideVerdict } from "./verdict/engine.js";
 import { writeReports, type WriteReportResult } from "./reporting/reporter.js";
 
@@ -70,7 +73,12 @@ export async function runVerification(
   if (req.workdir) {
     const runner = new CommandRunner(req.workdir, artifactRoot);
     for (const step of plan.steps) {
-      results.push(await runner.runStep(step));
+      if (step.id.startsWith("probe-")) {
+        const criterionText = criteria.criteria.find((c) => c.id === step.criterionIds[0])?.text;
+        results.push(await runProbeWithSelfCheck(runner, step, criterionText, cfg, deps.llm));
+      } else {
+        results.push(await runner.runStep(step));
+      }
       // Stop spending on probes/tests if environment setup failed hard.
       if (step.id.startsWith("setup-")) {
         const last = results[results.length - 1]!;
@@ -122,6 +130,45 @@ export async function runVerification(
 
   const reportPaths = await writeReports(report, runDir);
   return { report, runDir, reportPaths };
+}
+
+/**
+ * Run a probe, and if it fails with an environment/command-error signature (our probe is
+ * broken, not the product — IN-545/IN-552), ask the LLM to regenerate a corrected probe and
+ * re-run it, up to `maxRetries` times. Each retry runs under a suffixed step id so its log is
+ * preserved as evidence; the returned result carries the canonical `probe-<id>` so the verdict
+ * engine still matches it to the criterion. Without a real LLM (fallback) nothing is repaired.
+ */
+export async function runProbeWithSelfCheck(
+  runner: CommandRunner,
+  step: PlanStep,
+  criterionText: string | undefined,
+  cfg: RepoConfig,
+  llm: LlmClient,
+  maxRetries = 2,
+): Promise<HarnessResult> {
+  let result = await runner.runStep(step);
+  let attempt = 0;
+  while (
+    attempt < maxRetries &&
+    criterionText &&
+    result.executed &&
+    result.exitCode !== 0 &&
+    looksLikeHarnessError(result.stdout + "\n" + result.stderr)
+  ) {
+    const fixed = await regenerateProbe({
+      criterionText,
+      failedCommand: result.command ?? step.command ?? "",
+      errorOutput: result.stdout + "\n" + result.stderr,
+      cfg,
+      llm,
+    });
+    if (!fixed) break;
+    attempt++;
+    const retry = await runner.runStep({ ...step, id: `${step.id}-fix${attempt}`, command: fixed });
+    result = { ...retry, stepId: step.id }; // canonical id so the verdict engine matches it
+  }
+  return result;
 }
 
 function normalizeIssueKey(input: string): string {
