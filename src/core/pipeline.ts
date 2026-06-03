@@ -1,6 +1,7 @@
 import path from "node:path";
 import type {
   CriterionResult,
+  EvaluationPlan,
   HarnessResult,
   PlanStep,
   QualityEvent,
@@ -8,6 +9,8 @@ import type {
   RunRequest,
   RunVerdict,
 } from "../types.js";
+import { type UiHarness, UnavailableUiHarness } from "../harness/ui/uiHarness.js";
+import { runUiChecks } from "../harness/ui/runUiChecks.js";
 import type { LlmClient } from "../backends/llm.js";
 import type { MemoryStore } from "../memory/store.js";
 import type { EventLog } from "../memory/eventLog.js";
@@ -31,6 +34,8 @@ export interface PipelineDeps {
   memory: MemoryStore;
   eventLog: EventLog;
   clock?: () => string;
+  /** UI execution backend for level=ui (IN-559). Defaults to UnavailableUiHarness. */
+  uiHarness?: UiHarness;
 }
 
 export interface PipelineOutput {
@@ -63,30 +68,60 @@ export async function runVerification(
   }
   const issue = await deps.linear.loadIssue(issueKey);
 
-  // --- Criteria (from the issue) + plan ------------------------------------------------
+  // --- Criteria (from the issue) ------------------------------------------------------
   const criteria = await parseCriteria(issue, pr, deps.llm);
-  const cfg = await loadRepoConfig(req.workdir);
-  const plan = await buildPlan(req.level, criteria, pr, cfg, deps.memory);
 
-  // --- Real execution ------------------------------------------------------------------
   const runId = `${issue.key}_pr${pr.number}_${startedAt.replace(/[^0-9]/g, "").slice(0, 14)}`;
   const runDir = path.join(req.outputRoot, "runs", runId);
   const artifactRoot = path.join(runDir, "artifacts");
 
+  // --- Plan + real execution (level-specific) -----------------------------------------
+  let plan: EvaluationPlan;
   const results: HarnessResult[] = [];
-  if (req.workdir) {
-    const runner = new CommandRunner(req.workdir, artifactRoot, { isolate: req.sandbox !== false });
-    for (const step of plan.steps) {
-      if (step.id.startsWith("probe-")) {
-        const criterionText = criteria.criteria.find((c) => c.id === step.criterionIds[0])?.text;
-        results.push(await runProbeWithSelfCheck(runner, step, criterionText, cfg, deps.llm));
-      } else {
-        results.push(await runner.runStep(step));
-      }
-      // Stop spending on probes/tests if environment setup failed hard.
-      if (step.id.startsWith("setup-")) {
-        const last = results[results.length - 1]!;
-        if (!last.executed || last.exitCode !== 0) break;
+  let repoConfigSource = "n/a";
+
+  if (req.level === "ui") {
+    // UI level: browser-driven checks (IN-559). The browser is an execution backend behind the
+    // UiHarness seam; until a real driver is wired the default reports checks as not executed.
+    const ui = deps.uiHarness ?? new UnavailableUiHarness();
+    // UI checks are judged by the browser (pass/fail), not by stdout. Replace any command-probe
+    // a criterion picked up with a clean ui marker so the engine scores exit 0 = pass / 1 = fail
+    // and never compares against a stdout substring meant for a CLI probe.
+    for (const c of criteria.criteria) {
+      if (c.observable) c.probe = { command: `ui-check: ${c.text}`, fromTicket: true };
+    }
+    plan = {
+      level: "ui",
+      steps: criteria.criteria
+        .filter((c) => c.observable)
+        .map((c) => ({
+          id: `probe-${c.id}`,
+          kind: "inspect",
+          description: `ui check for ${c.id}`,
+          criterionIds: [c.id],
+          reusedTestPoint: false,
+        })),
+      notes: [`ui level: browser-driven checks via ${ui.name}`],
+    };
+    results.push(...(await runUiChecks(ui, criteria, req.baseUrl)));
+  } else {
+    const cfg = await loadRepoConfig(req.workdir);
+    repoConfigSource = cfg.source;
+    plan = await buildPlan(req.level, criteria, pr, cfg, deps.memory);
+    if (req.workdir) {
+      const runner = new CommandRunner(req.workdir, artifactRoot, { isolate: req.sandbox !== false });
+      for (const step of plan.steps) {
+        if (step.id.startsWith("probe-")) {
+          const criterionText = criteria.criteria.find((c) => c.id === step.criterionIds[0])?.text;
+          results.push(await runProbeWithSelfCheck(runner, step, criterionText, cfg, deps.llm));
+        } else {
+          results.push(await runner.runStep(step));
+        }
+        // Stop spending on probes/tests if environment setup failed hard.
+        if (step.id.startsWith("setup-")) {
+          const last = results[results.length - 1]!;
+          if (!last.executed || last.exitCode !== 0) break;
+        }
       }
     }
   }
@@ -121,7 +156,7 @@ export async function runVerification(
       node: process.version,
       platform: process.platform,
       workdir: req.workdir ?? "(none — no execution)",
-      repoConfig: cfg.source,
+      repoConfig: repoConfigSource,
     },
     startedAt,
     finishedAt,
