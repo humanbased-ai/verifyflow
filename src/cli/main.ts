@@ -148,10 +148,13 @@ async function cmdRun(args: Args): Promise<number> {
     );
   }
 
-  const { report, reportPaths } = await runVerification(request, deps);
+  const { report, reportPaths, signalPath } = await runVerification(request, deps);
 
   console.log(renderMarkdown(report));
   console.error(`\n[verifyflow] reports: ${reportPaths.markdownPath} | ${reportPaths.jsonPath}`);
+  if (signalPath) {
+    console.error(`[verifyflow] bounce-back signal (feed to the coding agent): ${signalPath}`);
+  }
 
   if (args.comment && !fixtures) {
     const ok = await postPrComment(report, renderMarkdown(report));

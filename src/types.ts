@@ -252,6 +252,39 @@ export interface QualityEvent {
   reused?: boolean;
 }
 
+/**
+ * Bounce-back improvement signal (IN-554): a machine-consumable artifact emitted when a PR
+ * does not fully deliver its ticket, so a coding agent (Crosscheck/Symphony) can ingest it and
+ * dispatch a fix — instead of a human re-reading prose. One item per non-passing criterion.
+ */
+export type ImprovementSeverity = "must_fix" | "investigate" | "needs_clarification";
+
+export interface ImprovementItem {
+  criterionId: string;
+  criterion: string;
+  result: CriterionResultValue;
+  severity: ImprovementSeverity;
+  failureCategory?: FailureCategory;
+  /** What the criterion required (probe expectation or, absent a probe, the criterion text). */
+  expected: string;
+  /** What execution actually showed (probe exit/output, or the verdict reason). */
+  observed: string;
+  /** The exact probe command run, when there was one. */
+  probeCommand?: string;
+  /** Evidence artifact paths supporting this item. */
+  evidence: string[];
+}
+
+export interface ImprovementSignal {
+  schemaVersion: 1;
+  repo: string;
+  prNumber: number;
+  commitSha: string;
+  linearIssue: string;
+  verdict: RunVerdict;
+  items: ImprovementItem[];
+}
+
 /** A persisted, reusable test point (Karpathy: keep memory, not just a score). */
 export interface TestPoint {
   id: string;

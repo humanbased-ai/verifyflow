@@ -21,6 +21,7 @@ import { regenerateProbe } from "../harness/probeFix.js";
 import { looksLikeHarnessError } from "../util/harnessError.js";
 import { decideVerdict } from "./verdict/engine.js";
 import { writeReports, type WriteReportResult } from "./reporting/reporter.js";
+import { buildImprovementSignal, writeImprovementSignal } from "./reporting/improvementSignal.js";
 
 export interface PipelineDeps {
   linear: LinearClient;
@@ -35,6 +36,8 @@ export interface PipelineOutput {
   report: RunReport;
   runDir: string;
   reportPaths: WriteReportResult;
+  /** Path to the bounce-back improvement signal, when the PR did not fully deliver (IN-554). */
+  signalPath?: string;
 }
 
 export async function runVerification(
@@ -129,7 +132,12 @@ export async function runVerification(
   await persistMemoryAndEvents(req, deps, report, criteria, plan, results, component, finishedAt);
 
   const reportPaths = await writeReports(report, runDir);
-  return { report, runDir, reportPaths };
+
+  // Bounce-back (IN-554): emit a machine-consumable signal a coding agent can act on.
+  const signal = buildImprovementSignal(report, criteria.criteria, results);
+  const signalPath = await writeImprovementSignal(signal, runDir);
+
+  return { report, runDir, reportPaths, signalPath };
 }
 
 /**
