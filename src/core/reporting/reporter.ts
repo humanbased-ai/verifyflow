@@ -91,12 +91,42 @@ export async function writeReports(report: RunReport, runDir: string): Promise<W
   return { jsonPath, markdownPath };
 }
 
-/** Publish the markdown report as a PR comment via the authorized `gh` CLI. */
+/** Hidden marker that identifies VerifyFlow's own PR comment so re-runs update it in place. */
+export const VF_COMMENT_MARKER = "<!-- verifyflow:delivery-report -->";
+
+/** Pick the id of an existing VerifyFlow comment (by marker) from a GitHub comments list. */
+export function selectExistingCommentId(
+  comments: Array<{ id: number; body?: string }>,
+): number | undefined {
+  return comments.find((c) => (c.body ?? "").includes(VF_COMMENT_MARKER))?.id;
+}
+
+/**
+ * Publish the markdown report as a PR comment via the authorized `gh` CLI — idempotently.
+ * If VerifyFlow already commented on this PR (identified by a hidden marker), edit that comment
+ * in place instead of stacking a new one on every re-run (IN-560).
+ */
 export async function postPrComment(report: RunReport, body: string): Promise<boolean> {
-  const res = await run("gh", [
-    "pr", "comment", String(report.request.prNumber),
-    "--repo", report.request.repo,
-    "--body", body,
-  ]);
+  const repo = report.request.repo;
+  const pr = report.request.prNumber;
+  const marked = `${VF_COMMENT_MARKER}\n${body}`;
+
+  const list = await run("gh", ["api", `repos/${repo}/issues/${pr}/comments?per_page=100`]);
+  if (list.executed && list.code === 0) {
+    try {
+      const existingId = selectExistingCommentId(JSON.parse(list.stdout));
+      if (existingId !== undefined) {
+        const edit = await run("gh", [
+          "api", "--method", "PATCH", `repos/${repo}/issues/comments/${existingId}`,
+          "-f", `body=${marked}`,
+        ]);
+        return edit.executed && edit.code === 0;
+      }
+    } catch {
+      /* fall through to creating a new comment */
+    }
+  }
+
+  const res = await run("gh", ["pr", "comment", String(pr), "--repo", repo, "--body", marked]);
   return res.executed && res.code === 0;
 }
