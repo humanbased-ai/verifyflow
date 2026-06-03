@@ -3,6 +3,7 @@ import type {
   CriterionResult,
   EvaluationPlan,
   HarnessResult,
+  IssueContext,
   PlanStep,
   QualityEvent,
   RunReport,
@@ -61,12 +62,25 @@ export async function runVerification(
     req.linearIssue && req.linearIssue.trim().length > 0
       ? normalizeIssueKey(req.linearIssue)
       : linearKeyFromPr(pr);
-  if (!issueKey) {
+  // Degraded no-ticket mode (IN-570): the PR's own title/description stands in for the
+  // ticket. That is the PR grading its own homework, so the verdict is capped later.
+  const degraded = !issueKey && req.allowNoTicket === true;
+  if (!issueKey && !degraded) {
     throw new Error(
-      "No Linear issue provided and none found in the PR body. VerifyFlow requires a ticket.",
+      "No Linear issue provided and none found in the PR body or branch name. VerifyFlow " +
+        "requires a ticket — or pass --allow-no-ticket to verify against the PR's own " +
+        "description (verdict capped at manual_review_required).",
     );
   }
-  const issue = await deps.linear.loadIssue(issueKey);
+  const issue: IssueContext = degraded
+    ? {
+        key: `PR-${pr.number}`,
+        title: pr.title,
+        description: pr.body,
+        url: pr.url,
+        source: "pr-degraded",
+      }
+    : await deps.linear.loadIssue(issueKey!);
 
   // --- Criteria (from the issue) ------------------------------------------------------
   const criteria = await parseCriteria(issue, pr, deps.llm);
@@ -129,6 +143,23 @@ export async function runVerification(
   // --- Verdict -------------------------------------------------------------------------
   const verdict = await decideVerdict(criteria, plan, results, deps.llm);
 
+  // Degraded cap (IN-570): without an independent acceptance source, a positive outcome
+  // can only mean "the PR does what it claims" — escalate to a human instead of accepting.
+  // A demonstrated failure (needs_fix) is kept: failing your own claims needs no ticket.
+  let runVerdict = verdict.runVerdict;
+  let summary = verdict.summary;
+  const ticketQualityIssues = [...criteria.ticketQualityIssues];
+  if (degraded) {
+    ticketQualityIssues.push(
+      "⚠️ degraded run: no Linear ticket — acceptance criteria derived from the PR's own " +
+        "description (no independent acceptance source); verdict capped at manual_review_required.",
+    );
+    if (runVerdict === "accept" || runVerdict === "accept_with_risks") {
+      summary = `No independent acceptance source (verdict capped from ${runVerdict}): ${summary}`;
+      runVerdict = "manual_review_required";
+    }
+  }
+
   const finishedAt = now();
   const commitSha = pr.headSha || req.commitSha || "";
   const component = deriveComponent(pr);
@@ -148,9 +179,9 @@ export async function runVerification(
     issue: { key: issue.key, title: issue.title, url: issue.url, source: issue.source },
     plan,
     criterionResults: verdict.criterionResults,
-    runVerdict: verdict.runVerdict,
-    summary: verdict.summary,
-    ticketQualityIssues: criteria.ticketQualityIssues,
+    runVerdict,
+    summary,
+    ticketQualityIssues,
     evidenceRoot: path.relative(req.outputRoot, artifactRoot),
     environment: {
       node: process.version,
@@ -162,7 +193,7 @@ export async function runVerification(
     startedAt,
     finishedAt,
     durationMs: results.reduce((a, r) => a + r.durationMs, 0),
-    gate: gateDecision(req.policy, verdict.runVerdict, verdict.criterionResults),
+    gate: gateDecision(req.policy, runVerdict, verdict.criterionResults),
   };
 
   // --- Quality intelligence: persist memory + events (the "feed test points back" loop) -

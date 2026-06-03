@@ -45,6 +45,8 @@ Options:
   --comment              Post the markdown report as a PR comment (live only; updates in place).
   --linear-writeback     Post the delivery verdict back to the linked Linear issue (live only).
   --no-sandbox           Pass host env (incl. secrets) to probes. Default: strip secrets.
+  --allow-no-ticket      Degraded mode when no Linear issue can be resolved: verify against
+                         the PR's own description; verdict capped at manual_review_required.
   -h, --help             Show this help.
 
 Auth model: VerifyFlow stores no secrets. It uses the authorized CLIs you have installed —
@@ -169,6 +171,7 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     baseUrl: str(args["base-url"]),
     sandbox: !args["no-sandbox"],
     crosscheckVerdict: str(args["crosscheck-verdict"]),
+    allowNoTicket: !!args["allow-no-ticket"],
   };
 
   const deps: PipelineDeps = {
@@ -200,7 +203,7 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     );
   }
 
-  if (args["linear-writeback"] && !fixtures && linear.addComment) {
+  if (args["linear-writeback"] && !fixtures && linear.addComment && report.issue.source !== "pr-degraded") {
     const ok = await linear.addComment(
       report.issue.key,
       `VerifyFlow delivery verdict: **${report.runVerdict}**. ${report.summary}`,
