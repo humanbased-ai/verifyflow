@@ -17,8 +17,14 @@ export interface RepoConfig {
   testForFiles: (paths: string[], keywords?: string[]) => string | undefined;
   /** Prefix used to run project entrypoints (e.g. "uv run"); undefined for none. */
   runPrefix?: string;
-  /** Where the config came from: "file" | "inferred-python-uv" | "inferred-node" | "none". */
+  /** Where the config came from, e.g. "file" | "inferred-python-uv" | "inferred-go" | "unknown". */
   source: string;
+  /**
+   * True when the repo ecosystem could not be determined and no explicit config was provided.
+   * VerifyFlow must NOT guess a toolchain in this case — the run is reported as
+   * environment-blocked rather than executed against wrong commands (IN-551).
+   */
+  unknown?: boolean;
 }
 
 // Binaries that already resolve outside the project environment and must never be
@@ -73,8 +79,15 @@ export async function loadRepoConfig(workdir: string | undefined): Promise<RepoC
     const inferred = await infer(workdir);
     if (inferred) return inferred;
   }
-  // Default assumes a uv/pytest project (the dogfood target, Symphony).
-  return pythonUvConfig("none");
+  // No explicit config and no recognized ecosystem: do NOT guess a toolchain (IN-551).
+  // Guessing python-uv here is exactly what produced wrong commands on non-uv repos.
+  return {
+    setup: [],
+    test: "",
+    testForFiles: () => undefined,
+    source: "unknown",
+    unknown: true,
+  };
 }
 
 async function readExplicit(workdir: string): Promise<RepoConfig | undefined> {
@@ -100,22 +113,93 @@ async function readExplicit(workdir: string): Promise<RepoConfig | undefined> {
   }
 }
 
+/**
+ * Infer the toolchain from well-known files. Ordered most-specific first so a lockfile
+ * (uv.lock, poetry.lock, pnpm-lock.yaml) wins over the generic manifest it sits next to.
+ * Returns undefined when nothing matches — the caller then reports environment-unknown.
+ */
 async function infer(workdir: string): Promise<RepoConfig | undefined> {
   const has = async (f: string) =>
     fs.access(path.join(workdir, f)).then(() => true).catch(() => false);
-  if ((await has("pyproject.toml")) && (await has("uv.lock"))) {
-    return pythonUvConfig("inferred-python-uv");
+  const readText = async (f: string) =>
+    fs.readFile(path.join(workdir, f), "utf8").catch(() => "");
+
+  const hasPyproject = await has("pyproject.toml");
+
+  // --- Python -------------------------------------------------------------------------
+  if (hasPyproject && (await has("uv.lock"))) return pythonUvConfig("inferred-python-uv");
+  if ((await has("poetry.lock")) || /\[tool\.poetry\]/.test(await readText("pyproject.toml"))) {
+    return prefixedPytest("poetry run", "inferred-python-poetry", ["poetry install"]);
   }
-  if (await has("package.json")) {
+  if (hasPyproject || (await has("requirements.txt")) || (await has("setup.py")) || (await has("setup.cfg"))) {
+    // Plain pip/venv: no reliable run prefix; use the interpreter directly.
+    return prefixedPytest(undefined, "inferred-python-pip", [
+      "python -m pip install -e . || python -m pip install -r requirements.txt || true",
+    ]);
+  }
+
+  // --- Node ---------------------------------------------------------------------------
+  if (await has("pnpm-lock.yaml")) return nodeConfig("pnpm", "inferred-node-pnpm");
+  if (await has("yarn.lock")) return nodeConfig("yarn", "inferred-node-yarn");
+  if (await has("package.json")) return nodeConfig("npm", "inferred-node");
+
+  // --- Other ecosystems ---------------------------------------------------------------
+  if (await has("go.mod")) {
     return {
-      setup: ["npm ci || npm install"],
-      test: "npm test",
-      testForFiles: (paths) =>
-        paths.length ? `npx vitest run ${paths.join(" ")}` : undefined,
-      source: "inferred-node",
+      setup: ["go build ./..."],
+      test: "go test ./...",
+      testForFiles: (paths) => (paths.length ? `go test ${dirsOf(paths).join(" ")}` : "go test ./..."),
+      source: "inferred-go",
+    };
+  }
+  if (await has("Cargo.toml")) {
+    return {
+      setup: ["cargo build"],
+      test: "cargo test",
+      testForFiles: () => "cargo test",
+      runPrefix: "cargo run --",
+      source: "inferred-cargo",
+    };
+  }
+  if (await has("Makefile")) {
+    return {
+      setup: ["make"],
+      test: "make test",
+      testForFiles: () => "make test",
+      source: "inferred-make",
     };
   }
   return undefined;
+}
+
+/** Unique parent directories of the given file paths (for `go test <dir>`). */
+function dirsOf(paths: string[]): string[] {
+  const dirs = new Set(paths.map((p) => "./" + (path.posix.dirname(p) || ".")));
+  return [...dirs];
+}
+
+function nodeConfig(pm: "npm" | "pnpm" | "yarn", source: string): RepoConfig {
+  const install = pm === "npm" ? "npm ci || npm install" : pm === "pnpm" ? "pnpm install" : "yarn install";
+  const runner = pm === "npm" ? "npx" : pm;
+  return {
+    setup: [install],
+    test: `${pm === "yarn" ? "yarn" : pm} test`,
+    testForFiles: (paths) => (paths.length ? `${runner} vitest run ${paths.join(" ")}` : undefined),
+    source,
+  };
+}
+
+/** A pytest-based Python config with an optional run prefix (uv run / poetry run / none). */
+function prefixedPytest(runPrefix: string | undefined, source: string, setup: string[]): RepoConfig {
+  const base = runPrefix ? `${runPrefix} pytest -q` : "python -m pytest -q";
+  return {
+    setup,
+    test: base,
+    runPrefix,
+    testForFiles: (paths, keywords) =>
+      paths.length ? `${base} ${paths.join(" ")}${kFilter(true, keywords)}` : undefined,
+    source,
+  };
 }
 
 function pythonUvConfig(source: string): RepoConfig {

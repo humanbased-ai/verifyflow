@@ -63,6 +63,23 @@ export async function decideVerdict(
 
   const scoped = byStep.get("tests-scoped");
 
+  // Unknown toolchain (IN-551): nothing could be executed. Report every criterion as
+  // environment-blocked with the explicit reason — never a pass or a product fail.
+  if (plan.environmentUnknown) {
+    const criterionResults = criteria.criteria.map<CriterionResult>((c) => ({
+      criterionId: c.id,
+      criterion: c.text,
+      method: c.method,
+      result: "blocked",
+      reason: plan.environmentUnknown!.reason,
+      evidence: [],
+      confidence: 0.5,
+      failureCategory: "environment_failure",
+    }));
+    const runVerdict = rollUp(criterionResults);
+    return { criterionResults, runVerdict, summary: buildSummary(criterionResults, runVerdict, plan) };
+  }
+
   const criterionResults: CriterionResult[] = criteria.criteria.map((c) =>
     evaluateCriterion(c, byStep.get(`probe-${c.id}`), scoped, setupFailed),
   );

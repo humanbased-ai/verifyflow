@@ -160,6 +160,11 @@ export interface EvaluationPlan {
   notes: string[];
   /** Recommended escalation when risk exceeds the requested level (docs/evaluation-levels.md). */
   escalationRecommended?: { toLevel: Level; reason: string };
+  /**
+   * Set when the repo toolchain could not be determined (IN-551). The harness runs no steps and
+   * every criterion is reported environment-blocked rather than judged against guessed commands.
+   */
+  environmentUnknown?: { reason: string };
 }
 
 export interface HarnessResult {
