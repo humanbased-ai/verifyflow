@@ -151,9 +151,10 @@ async function infer(workdir: string): Promise<RepoConfig | undefined> {
   }
 
   // --- Node ---------------------------------------------------------------------------
-  if (await has("pnpm-lock.yaml")) return nodeConfig("pnpm", "inferred-node-pnpm");
-  if (await has("yarn.lock")) return nodeConfig("yarn", "inferred-node-yarn");
-  if (await has("package.json")) return nodeConfig("npm", "inferred-node");
+  const pkg = parsePackageJson(await readText("package.json"));
+  if (await has("pnpm-lock.yaml")) return nodeConfig("pnpm", "inferred-node-pnpm", pkg);
+  if (await has("yarn.lock")) return nodeConfig("yarn", "inferred-node-yarn", pkg);
+  if (await has("package.json")) return nodeConfig("npm", "inferred-node", pkg);
 
   // --- Other ecosystems ---------------------------------------------------------------
   if (await has("go.mod")) {
@@ -190,13 +191,49 @@ function dirsOf(paths: string[]): string[] {
   return [...dirs];
 }
 
-function nodeConfig(pm: "npm" | "pnpm" | "yarn", source: string): RepoConfig {
+interface PackageJson {
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+}
+
+function parsePackageJson(text: string): PackageJson {
+  try {
+    return text ? (JSON.parse(text) as PackageJson) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Build the scoped (changed-files) test command for the actual runner this repo uses, read from
+ * its `package.json` `test` script and deps — NOT a hardcoded `vitest` (IN-624). Returns undefined
+ * for an undetectable runner so we never emit a wrong command that would error and be mis-scored
+ * as a product failure; criteria then fall through to not_evaluable instead of a false fail.
+ */
+function scopedTestFor(pkg: PackageJson, runner: string): (paths: string[]) => string | undefined {
+  const testScript = pkg.scripts?.test ?? "";
+  const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+  const dep = (n: string) => Object.prototype.hasOwnProperty.call(deps, n);
+  const scoped = (cmd: string) => (paths: string[]) => (paths.length ? `${cmd} ${paths.join(" ")}` : undefined);
+
+  if (/vitest/.test(testScript) || dep("vitest")) return scoped(`${runner} vitest run`);
+  if (/jest/.test(testScript) || dep("jest")) return scoped(`${runner} jest`);
+  // Node's built-in test runner (`node --test`), optionally with tsx for TS sources.
+  if (/node\b[^|&]*--test/.test(testScript) || /(^|\s)--test\b/.test(testScript)) {
+    const tsx = /tsx/.test(testScript) || dep("tsx");
+    return scoped(tsx ? "node --import tsx --test" : "node --test");
+  }
+  return () => undefined; // unknown runner — don't guess a scoped command
+}
+
+function nodeConfig(pm: "npm" | "pnpm" | "yarn", source: string, pkg: PackageJson): RepoConfig {
   const install = pm === "npm" ? "npm ci || npm install" : pm === "pnpm" ? "pnpm install" : "yarn install";
   const runner = pm === "npm" ? "npx" : pm;
   return {
     setup: [install],
     test: `${pm === "yarn" ? "yarn" : pm} test`,
-    testForFiles: (paths) => (paths.length ? `${runner} vitest run ${paths.join(" ")}` : undefined),
+    testForFiles: scopedTestFor(pkg, runner),
     source,
   };
 }

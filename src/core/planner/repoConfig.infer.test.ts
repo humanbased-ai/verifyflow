@@ -26,10 +26,32 @@ test("poetry is detected from poetry.lock", async () => {
   assert.equal(cfg.runPrefix, "poetry run");
 });
 
-test("node is detected from package.json and scopes vitest to changed files", async () => {
-  const cfg = await loadRepoConfig(await repoWith({ "package.json": "{}" }));
+test("node + vitest: scopes with vitest (IN-624)", async () => {
+  const pkg = JSON.stringify({ scripts: { test: "vitest run" }, devDependencies: { vitest: "^1" } });
+  const cfg = await loadRepoConfig(await repoWith({ "package.json": pkg }));
   assert.equal(cfg.source, "inferred-node");
   assert.equal(cfg.testForFiles(["src/a.test.ts"]), "npx vitest run src/a.test.ts");
+});
+
+test("node + node:test runner: scopes with `node --import tsx --test`, NOT vitest (IN-624)", async () => {
+  const pkg = JSON.stringify({
+    scripts: { test: 'node --import tsx --test "src/**/*.test.ts"' },
+    devDependencies: { tsx: "^4" },
+  });
+  const cfg = await loadRepoConfig(await repoWith({ "package.json": pkg }));
+  assert.equal(cfg.testForFiles(["src/a.test.ts"]), "node --import tsx --test src/a.test.ts");
+});
+
+test("node + jest: scopes with jest (IN-624)", async () => {
+  const pkg = JSON.stringify({ scripts: { test: "jest" }, devDependencies: { jest: "^29" } });
+  const cfg = await loadRepoConfig(await repoWith({ "package.json": pkg }));
+  assert.equal(cfg.testForFiles(["src/a.test.ts"]), "npx jest src/a.test.ts");
+});
+
+test("node with an undetectable runner emits NO scoped command (no wrong-runner false fail) (IN-624)", async () => {
+  const cfg = await loadRepoConfig(await repoWith({ "package.json": "{}" }));
+  assert.equal(cfg.source, "inferred-node");
+  assert.equal(cfg.testForFiles(["src/a.test.ts"]), undefined);
 });
 
 test("go is detected from go.mod and scopes tests to changed dirs", async () => {

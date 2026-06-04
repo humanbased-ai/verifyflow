@@ -254,6 +254,19 @@ function evaluateCriterion(
         confidence: 0.7,
       };
     }
+    // A scoped test command that errored with a harness/wrong-ecosystem signature (e.g. the
+    // wrong runner — `vitest` on a `node --test` repo) means the check could not run, not that
+    // the product failed. Block for review instead of a false `fail` (IN-624).
+    if (looksLikeHarnessError(scoped.stdout + "\n" + scoped.stderr)) {
+      return {
+        ...base,
+        result: "blocked",
+        reason: "Scoped tests errored with an environment/command signature (likely the wrong test runner), not a product failure — needs a corrected runner or manual review.",
+        evidence: scoped.evidence,
+        confidence: 0.5,
+        failureCategory: "environment_failure",
+      };
+    }
     return {
       ...base,
       result: "fail",
