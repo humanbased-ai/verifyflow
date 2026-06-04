@@ -30,7 +30,7 @@ Usage:
                                       checks out + executes + posts the report comment, and prints
                                       a single machine-readable JSON line to stdout. Never blocks.
   vf report [--out <dir>] [--json]    Aggregate accumulated runs into quality-intelligence metrics.
-  vf init                             Scaffold a verifyflow.config.json in the current directory.
+  vf init [--dir <path>]              Scaffold a verifyflow.config.json (default: current directory).
   vf doctor                           Check that required tools (gh, claude, uv, LINEAR_API_KEY) are ready.
 
 Step-only options:
@@ -324,9 +324,10 @@ async function cmdReport(args: Args): Promise<number> {
   return 0;
 }
 
-/** `vf init` — scaffold a per-repo config (IN-611). */
-async function cmdInit(): Promise<number> {
-  const res = await runInit(process.cwd());
+/** `vf init [--dir <path>]` — scaffold a per-repo config (IN-611). */
+async function cmdInit(args: Args): Promise<number> {
+  const dir = str(args.dir) ? path.resolve(str(args.dir)!) : process.cwd();
+  const res = await runInit(dir);
   if (res.created) {
     console.log(`created ${res.path}`);
     console.log("Edit it for your stack (setup / test / runPrefix), then run: vf run --help");
@@ -352,7 +353,7 @@ async function main(): Promise<number> {
   if (cmd === "run") return cmdRun(args);
   if (cmd === "step") return cmdStep(args);
   if (cmd === "report") return cmdReport(args);
-  if (cmd === "init") return cmdInit();
+  if (cmd === "init") return cmdInit(args);
   if (cmd === "doctor") return cmdDoctor();
   console.error(`error: unknown command "${cmd}"\n`);
   console.log(USAGE);

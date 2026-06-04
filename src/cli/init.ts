@@ -9,8 +9,17 @@ import path from "node:path";
 
 export const CONFIG_FILENAME = "verifyflow.config.json";
 
-/** The scaffold written by `vf init`. Fields mirror what `loadRepoConfig` reads (repoConfig.ts). */
-export function defaultConfig(): Record<string, unknown> {
+/** Shape of verifyflow.config.json — the fields `loadRepoConfig` reads (repoConfig.ts). */
+export interface VerifyflowFileConfig {
+  "//": string;
+  setup: string[];
+  test: string;
+  runPrefix: string;
+  testGlobPrefix: string;
+}
+
+/** The scaffold written by `vf init`. */
+export function defaultConfig(): VerifyflowFileConfig {
   return {
     "//": "VerifyFlow per-repo config. Commands run inside the PR checkout. Edit for your stack.",
     setup: ["npm ci || npm install"],
@@ -27,15 +36,20 @@ export interface InitResult {
   reason?: string;
 }
 
-/** Write the scaffold to <cwd>/verifyflow.config.json, refusing to clobber an existing file. */
+/**
+ * Write the scaffold to <cwd>/verifyflow.config.json, refusing to clobber an existing file.
+ * Uses an exclusive-create write (`flag: "wx"`) so the existence check and the write are atomic —
+ * no TOCTOU window between checking and writing.
+ */
 export async function runInit(cwd: string): Promise<InitResult> {
   const target = path.join(cwd, CONFIG_FILENAME);
   try {
-    await fs.access(target);
-    return { created: false, path: target, reason: "already exists — left untouched" };
-  } catch {
-    // Does not exist — safe to write.
+    await fs.writeFile(target, JSON.stringify(defaultConfig(), null, 2) + "\n", { flag: "wx" });
+    return { created: true, path: target };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      return { created: false, path: target, reason: "already exists — left untouched" };
+    }
+    throw err;
   }
-  await fs.writeFile(target, JSON.stringify(defaultConfig(), null, 2) + "\n");
-  return { created: true, path: target };
 }

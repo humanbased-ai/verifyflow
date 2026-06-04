@@ -47,7 +47,7 @@ export async function runDoctor(deps: DoctorDeps = {}): Promise<DoctorReport> {
 /** Render a doctor report as human-readable lines for the CLI. */
 export function renderDoctorReport(report: DoctorReport): string {
   const lines = report.checks.map((c) => {
-    const mark = c.ok ? "ok  " : c.required ? "FAIL" : "warn";
+    const mark = (c.ok ? "ok" : c.required ? "FAIL" : "warn").padEnd(4);
     return `  [${mark}] ${c.name}: ${c.detail}`;
   });
   lines.push("");
