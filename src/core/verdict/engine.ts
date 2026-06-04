@@ -173,7 +173,10 @@ function evaluateCriterion(
     // Only a probe quoted in the ticket is authoritative enough to declare a product failure.
     // An agent-invented probe that fails proves nothing about the product — it could be the
     // probe that is wrong (fragile command, wrong env). Treat that as "could not verify".
-    if (!c.probe?.fromTicket) {
+    // A self-check-regenerated probe is agent-invented too — its command no longer matches the
+    // ticket, so it is never authoritative even when the original probe was (IN-620).
+    const authoritative = Boolean(c.probe?.fromTicket) && !probe.probeRegenerated;
+    if (!authoritative) {
       return {
         ...base,
         result: "not_evaluable",
@@ -422,6 +425,8 @@ async function applyLlmJudgment(
     if (!c?.probe?.fromTicket) return false;
     const probe = byStepId.get(`probe-${id}`);
     if (!probe || !probe.executed) return false;
+    // A regenerated probe ran an agent-invented command, not the ticket's — not authoritative (IN-620).
+    if (probe.probeRegenerated) return false;
     if (looksLikeHarnessError(probe.stdout + "\n" + probe.stderr)) return false;
     return true;
   };

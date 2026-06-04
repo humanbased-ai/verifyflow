@@ -256,7 +256,9 @@ export async function runProbeWithSelfCheck(
     if (!fixed) break;
     attempt++;
     const retry = await runner.runStep({ ...step, id: `${step.id}-fix${attempt}`, command: fixed });
-    result = { ...retry, stepId: step.id }; // canonical id so the verdict engine matches it
+    // Canonical id so the verdict engine matches it; mark regenerated so the engine treats this
+    // agent-invented command as non-authoritative (its failure can't become a product fail, IN-620).
+    result = { ...retry, stepId: step.id, probeRegenerated: true };
   }
   return result;
 }

@@ -16,6 +16,14 @@ export const HARNESS_ERROR_SIGNATURES: RegExp[] = [
   /\bmodulenotfounderror\b/i,
   /^usage:/im,
   /\berror: failed to\b/i,
+  // A regenerated/agent-invented probe in the wrong ecosystem (IN-620): Node can't find a module
+  // (missing build output / wrong path), or a hallucinated pytest invocation errors on usage / runs
+  // no tests. None of these are product failures — the probe itself is broken.
+  /\bcannot find module\b/i,
+  /\berr_module_not_found\b/i,
+  /\bno tests ran\b/i,
+  /\bno tests collected\b/i,
+  /\busage:\s/i,
 ];
 
 export function looksLikeHarnessError(text: string): boolean {
