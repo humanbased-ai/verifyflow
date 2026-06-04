@@ -84,10 +84,12 @@ export async function watchTick(
     if (!parseCrosscheckApprove(comments)) continue;
     try {
       const r = await deps.verify(pr);
-      // Dedup only AFTER a completed verification (any returned verdict). If verify throws — e.g.
-      // a transient error — we do NOT stamp `seen`, so the head is retried on the next tick
-      // (every `interval`, not a hot loop) rather than being skipped permanently.
-      seen.set(pr.number, pr.headSha);
+      // Dedup only after a CONCLUSIVE verification. A non-conclusive `"error"` verdict — verify
+      // couldn't run (it threw and was caught below, OR the run executor returned an error code
+      // without throwing) — is NOT stamped, so the head is retried next tick (every `interval`,
+      // not a hot loop) instead of being permanently skipped. Real verdicts (accept / needs_fix /
+      // manual_review_required / …) are stamped so the same head isn't re-verified.
+      if (r.verdict !== "error") seen.set(pr.number, pr.headSha);
       acted.push({ pr: pr.number, headSha: pr.headSha, verdict: r.verdict, merged: r.merged });
     } catch (err) {
       acted.push({
@@ -104,7 +106,7 @@ export async function watchTick(
 
 // --- gh-backed I/O (live) ---------------------------------------------------------------------
 
-/** Max open PRs polled per tick; if a repo has more, the overflow is logged (not silently dropped). */
+/** Max open PRs polled per tick; if a repo has more, the overflow is logged and skipped this tick. */
 const PR_LIST_LIMIT = 100;
 
 /** List a repo's open PRs via the authorized `gh` CLI. */

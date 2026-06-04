@@ -372,6 +372,7 @@ async function cmdWatch(args: Args): Promise<number> {
     console.error("error: --interval must be a number of seconds\n");
     return 2;
   }
+  if (intervalSec < 10) console.error("[verifyflow] --interval clamped to the 10s minimum.");
   const intervalMs = Math.max(10, intervalSec) * 1000;
   const autoMerge = !!args["auto-merge"];
   const level = str(args.level) ?? "functional";
@@ -394,7 +395,7 @@ async function cmdWatch(args: Args): Promise<number> {
     `[verifyflow] vf watch on ${repo} — every ${intervalMs / 1000}s, auto-merge: ${autoMerge} (Ctrl-C to stop).`,
   );
   let stop = false;
-  process.on("SIGINT", () => {
+  process.once("SIGINT", () => {
     stop = true;
     console.error("\n[verifyflow] stopping watch after the current tick…");
   });

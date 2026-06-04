@@ -129,6 +129,38 @@ test("a thrown verify is not deduped — it retries on the next tick (review fix
   assert.equal(attempts, 2);
 });
 
+test("a RETURNED error verdict (no throw) is not deduped — retries next tick (BLOCK fix)", async () => {
+  let attempts = 0;
+  const seen = new Map<number, string>();
+  const d = deps({
+    listOpenPrs: async () => [{ number: 7, headSha: "aaa" }],
+    listIssueComments: async () => APPROVE,
+    // verify resolves (does NOT throw) with an error verdict — e.g. executeRun returned a code.
+    verify: async () => {
+      attempts++;
+      return attempts === 1 ? { verdict: "error", merged: false } : { verdict: "accept", merged: true };
+    },
+  });
+  const t1 = await watchTick("o/r", d, seen);
+  assert.equal(t1[0]!.verdict, "error");
+  assert.equal(seen.has(7), false, "an error verdict must not be stamped as verified");
+  const t2 = await watchTick("o/r", d, seen);
+  assert.equal(t2[0]!.verdict, "accept", "retried after a returned error verdict");
+});
+
+test("a real (non-error) verdict IS deduped — needs_fix is not re-verified", async () => {
+  let attempts = 0;
+  const seen = new Map<number, string>();
+  const d = deps({
+    listOpenPrs: async () => [{ number: 7, headSha: "aaa" }],
+    listIssueComments: async () => APPROVE,
+    verify: async () => { attempts++; return { verdict: "needs_fix", merged: false }; },
+  });
+  await watchTick("o/r", d, seen);
+  await watchTick("o/r", d, seen);
+  assert.equal(attempts, 1, "a conclusive verdict (needs_fix) is verified once per head");
+});
+
 test("comment-fetch failure for a PR is skipped without marking it seen (retries next tick)", async () => {
   let calls = 0;
   const seen = new Map<number, string>();
