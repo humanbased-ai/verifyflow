@@ -55,7 +55,7 @@ export function computeTrend(events: QualityEvent[]): Array<{ date: string; runs
   const byDay = new Map<string, { runs: number; verdicts: Record<string, number> }>();
   for (const e of events) {
     if (e.event_type !== "run_verdict") continue;
-    const date = (e.ts ?? "").slice(0, 10);
+    const date = e.ts.slice(0, 10);
     if (!date) continue;
     const day = byDay.get(date) ?? { runs: 0, verdicts: {} };
     day.runs++;

@@ -13,6 +13,15 @@ export function runDirFor(outputRoot: string, runId: string): string {
   return path.join(outputRoot, "runs", runId);
 }
 
+/**
+ * A run id names a single directory under `<out>/runs/` — it must not contain path separators or
+ * `..`, or an attacker-supplied argument (`vf replay/show/signal <runId>`) could traverse out of
+ * the output root and read arbitrary files (IN-625 review). Returns true if the id is unsafe.
+ */
+export function isUnsafeRunId(runId: string): boolean {
+  return runId !== path.basename(runId) || runId === ".." || runId.includes("\0");
+}
+
 async function readFileOrUndefined(p: string): Promise<string | undefined> {
   try {
     return await fs.readFile(p, "utf8");

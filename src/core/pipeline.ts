@@ -184,7 +184,9 @@ export async function runVerification(
   const results: HarnessResult[] = [];
 
   if (req.level === "ui") {
-    results.push(...(await runUiChecks(ui ?? new UnavailableUiHarness(), criteria, req.baseUrl)));
+    // buildEvaluationPlan always returns a defined `ui` for level=ui (it constructs the driver or
+    // an UnavailableUiHarness itself), so the non-null assertion is the real invariant here.
+    results.push(...(await runUiChecks(ui!, criteria, req.baseUrl)));
   } else if (req.workdir && cfg) {
     const runner = new CommandRunner(req.workdir, artifactRoot, { isolate: req.sandbox !== false });
     for (const step of plan.steps) {
@@ -261,15 +263,18 @@ export async function runVerification(
   // --- Quality intelligence: persist memory + events (the "feed test points back" loop) -
   await persistMemoryAndEvents(req, deps, report, criteria, plan, results, component, finishedAt);
 
-  const reportPaths = await writeReports(report, runDir);
-
-  // Persist the verdict engine's inputs so `vf replay <runId>` can re-derive the verdict from
-  // stored evidence without re-executing any probe/test (IN-625).
-  await writeVerdictInputs({ criteria, plan, results }, runDir);
-
-  // Bounce-back (IN-554): emit a machine-consumable signal a coding agent can act on.
+  // Build the bounce-back signal (IN-554) up front — it is pure — so all three run-dir artifacts
+  // are written together. Issuing them concurrently means no single write is gated behind another
+  // succeeding, so a failure can't leave report.md present but verdict-inputs.json /
+  // improvement-signal.json missing (IN-625 review).
   const signal = buildImprovementSignal(report, criteria.criteria, results);
-  const signalPath = await writeImprovementSignal(signal, runDir);
+  const [reportPaths, , signalPath] = await Promise.all([
+    writeReports(report, runDir),
+    // Persist the verdict engine's inputs so `vf replay <runId>` can re-derive the verdict from
+    // stored evidence without re-executing any probe/test (IN-625).
+    writeVerdictInputs({ criteria, plan, results }, runDir),
+    writeImprovementSignal(signal, runDir),
+  ]);
 
   return { report, runDir, reportPaths, signalPath };
 }

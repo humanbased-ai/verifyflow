@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { showRun, showSignal, renderSignal, runDirFor } from "./inspect.js";
+import { showRun, showSignal, renderSignal, runDirFor, isUnsafeRunId } from "./inspect.js";
 import type { ImprovementSignal } from "../types.js";
 
 async function makeRun(): Promise<{ outputRoot: string; runId: string }> {
@@ -82,6 +82,15 @@ test("signal on a clean run (no signal file) is not found with a clear message",
   const res = await showSignal(outputRoot, "clean-run", false);
   assert.equal(res.found, false);
   assert.match(res.text, /every criterion passed|does not exist/);
+});
+
+test("IN-625 review: isUnsafeRunId rejects path-traversal run ids", () => {
+  // Legitimate run ids pass.
+  assert.equal(isUnsafeRunId("EX-1_pr7_20260603000000"), false);
+  // Anything that isn't a bare directory name is rejected.
+  for (const bad of ["../../etc/passwd", "..", "a/b", "/abs/path", "x\0y", "sub/run"]) {
+    assert.equal(isUnsafeRunId(bad), true, `expected ${JSON.stringify(bad)} to be rejected`);
+  }
 });
 
 test("renderSignal includes all items", () => {

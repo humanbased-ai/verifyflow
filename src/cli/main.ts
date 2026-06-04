@@ -29,7 +29,7 @@ import { buildStepSummary } from "./step.js";
 import { runInit } from "./init.js";
 import { runDoctor, renderDoctorReport } from "./doctor.js";
 import { memoryLs, memoryShow, memoryClear } from "./memory.js";
-import { showRun, showSignal } from "./inspect.js";
+import { showRun, showSignal, isUnsafeRunId } from "./inspect.js";
 import {
   watchTick,
   ghListOpenPrs,
@@ -457,7 +457,10 @@ async function cmdReport(args: Args): Promise<number> {
     );
   }
   const events = filterEvents(all, filter);
-  const scoped = Object.values(filter).some(Boolean);
+  // An unparseable `--since` is ignored by filterEvents, so don't count it as applied — otherwise
+  // the scope message would advertise a filter that wasn't actually used (IN-625 review).
+  const sinceApplied = Boolean(filter.since) && !Number.isNaN(Date.parse(filter.since!));
+  const scoped = sinceApplied || Boolean(filter.repo) || Boolean(filter.level);
   if (events.length === 0) {
     console.error(
       `[verifyflow] no events match the given filter (since=${filter.since ?? "-"}, ` +
@@ -474,7 +477,7 @@ async function cmdReport(args: Args): Promise<number> {
   }
   if (scoped) {
     const f = [
-      filter.since ? `since ${filter.since}` : null,
+      sinceApplied ? `since ${filter.since}` : null,
       filter.repo ? `repo ${filter.repo}` : null,
       filter.level ? `level ${filter.level}` : null,
     ].filter(Boolean);
@@ -571,6 +574,10 @@ async function cmdReplay(args: Args, positionals: string[]): Promise<number> {
     console.error("error: vf replay <runId> needs a run id (see `.verifyflow/runs/`).");
     return 2;
   }
+  if (isUnsafeRunId(runId)) {
+    console.error(`error: invalid run id "${runId}" — must be a single run directory name.`);
+    return 2;
+  }
   const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
   const runDir = path.join(outputRoot, "runs", runId);
   let inputs;
@@ -612,6 +619,10 @@ async function cmdShow(args: Args, positionals: string[]): Promise<number> {
     console.error("error: vf show <runId> needs a run id (see `.verifyflow/runs/`).");
     return 2;
   }
+  if (isUnsafeRunId(runId)) {
+    console.error(`error: invalid run id "${runId}" — must be a single run directory name.`);
+    return 2;
+  }
   const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
   const res = await showRun(outputRoot, runId, !!args.json);
   if (!res.found) {
@@ -627,6 +638,10 @@ async function cmdSignal(args: Args, positionals: string[]): Promise<number> {
   const runId = positionals[0];
   if (!runId) {
     console.error("error: vf signal <runId> needs a run id (see `.verifyflow/runs/`).");
+    return 2;
+  }
+  if (isUnsafeRunId(runId)) {
+    console.error(`error: invalid run id "${runId}" — must be a single run directory name.`);
     return 2;
   }
   const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");

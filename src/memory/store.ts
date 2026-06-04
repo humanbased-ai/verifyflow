@@ -207,7 +207,11 @@ export class MemoryStore {
     }
   }
 
-  /** Find a single stored test point by its id, across all repos (IN-625, `vf memory show <key>`). */
+  /**
+   * Find a single stored test point by its id, across all repos (IN-625, `vf memory show <key>`).
+   * O(repos × points): a sequential scan that reads every repo's test-point file. Fine for the
+   * typical memory size; revisit (e.g. an id→repo index) if the store ever grows large.
+   */
   async findTestPoint(id: string): Promise<TestPoint | undefined> {
     for (const r of await this.listRepos()) {
       const points = await this.loadTestPointsBySlug(r.slug);
