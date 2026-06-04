@@ -238,13 +238,21 @@ export async function runProbeWithSelfCheck(
     result.exitCode !== 0 &&
     looksLikeHarnessError(result.stdout + "\n" + result.stderr)
   ) {
-    const fixed = await regenerateProbe({
-      criterionText,
-      failedCommand: result.command ?? step.command ?? "",
-      errorOutput: result.stdout + "\n" + result.stderr,
-      cfg,
-      llm,
-    });
+    // The regeneration calls the LLM; a transient model error must not crash the whole run
+    // (it would surface as a non-zero `vf step` exit and silently block an orchestrator's
+    // merge gate). On any failure, stop self-healing and keep the original result.
+    let fixed: string | undefined;
+    try {
+      fixed = await regenerateProbe({
+        criterionText,
+        failedCommand: result.command ?? step.command ?? "",
+        errorOutput: result.stdout + "\n" + result.stderr,
+        cfg,
+        llm,
+      });
+    } catch {
+      break;
+    }
     if (!fixed) break;
     attempt++;
     const retry = await runner.runStep({ ...step, id: `${step.id}-fix${attempt}`, command: fixed });
