@@ -85,3 +85,23 @@ test("readVerdictInputs rejects an unsupported schemaVersion (review)", async ()
   await fs.writeFile(path.join(runDir, VERDICT_INPUTS_FILENAME), JSON.stringify(payload, null, 2));
   await assert.rejects(readVerdictInputs(runDir), /schemaVersion 2 is not supported/);
 });
+
+// AC-5: `vf replay` must derive the verdict from *stored* evidence without re-executing any
+// probe/test subprocess. That negative guarantee can't be read off CLI output (PR #28 review), so
+// we assert it behaviorally: the stored evidence is a PASS whose probe command points at a binary
+// that does not exist. If replay re-ran the probe the process would fail to spawn (executed:false)
+// and the deterministic engine could not produce a confident pass — so a reproduced pass is only
+// possible by trusting the stored output, i.e. by spawning nothing.
+test("replay re-executes no probe/test — reproduces a pass even when the command is unrunnable", async () => {
+  const inputs = inputsFor(0); // stored evidence: a clean pass captured on the original run...
+  // ...but rewrite every command reference to a binary that cannot exist on any PATH.
+  const unrunnable = "/nonexistent/vf-replay-must-not-run --version";
+  inputs.criteria.criteria[0]!.probe!.command = unrunnable;
+  inputs.plan.steps[0]!.command = unrunnable;
+  inputs.results[0]!.command = unrunnable;
+
+  const verdict = await replayVerdict({ schemaVersion: 1, ...inputs }, new FallbackLlm());
+  // A confident pass is unreachable if the command had been re-run, proving stored evidence is reused.
+  assert.equal(verdict.runVerdict, "accept");
+  assert.equal(verdict.criterionResults[0]!.result, "pass");
+});
