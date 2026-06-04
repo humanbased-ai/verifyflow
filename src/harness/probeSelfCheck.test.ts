@@ -45,3 +45,16 @@ test("without a real LLM, a broken probe is left as-is (no infinite loop, no inv
   const result = await runProbeWithSelfCheck(await runner(), step, "the thing works", cfg, new FallbackLlm());
   assert.notEqual(result.exitCode, 0, "unrepaired probe keeps its failing result");
 });
+
+test("an LLM error during regeneration does not crash — original result is kept (IN-608)", async () => {
+  const throwingLlm: LlmClient = {
+    name: "throwing-stub",
+    available: async () => true,
+    complete: async () => {
+      throw new Error("transient model error");
+    },
+  };
+  const result = await runProbeWithSelfCheck(await runner(), step, "the thing works", cfg, throwingLlm);
+  assert.notEqual(result.exitCode, 0, "falls back to the original failing probe instead of throwing");
+  assert.equal(result.stepId, "probe-AC-1");
+});

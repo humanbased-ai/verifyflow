@@ -17,7 +17,10 @@ export interface CommandRunnerTimeouts {
 
 const DEFAULT_TIMEOUTS: CommandRunnerTimeouts = {
   setupMs: 600_000, // dependency install can be slow
-  probeMs: 60_000, // a CLI probe should be fast; a hang is a signal
+  // A probe is usually a fast CLI invocation, but the planner can also pick the repo's own
+  // test command as a probe (e.g. `npm test`), which legitimately runs for a minute or two.
+  // 120s tolerates a real test suite while still catching a true hang.
+  probeMs: 120_000,
   testMs: 240_000, // scoped tests; bounded so one hung test can't stall the run
   defaultMs: 180_000,
 };
