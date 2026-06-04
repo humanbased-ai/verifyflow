@@ -20,6 +20,13 @@ import { computeMetrics, renderMetricsMarkdown } from "../core/reporting/metrics
 import { buildStepSummary } from "./step.js";
 import { runInit } from "./init.js";
 import { runDoctor, renderDoctorReport } from "./doctor.js";
+import {
+  watchTick,
+  ghListOpenPrs,
+  ghListIssueComments,
+  ghMergePr,
+  type WatchDeps,
+} from "./watch.js";
 
 const USAGE = `verifyflow — evidence-backed delivery verification
 
@@ -32,6 +39,9 @@ Usage:
   vf report [--out <dir>] [--json]    Aggregate accumulated runs into quality-intelligence metrics.
   vf init [--dir <path>]              Scaffold a verifyflow.config.json (default: current directory).
   vf doctor                           Check that required tools (gh, claude, uv, LINEAR_API_KEY) are ready.
+  vf watch  --repo <owner/repo> [--auto-merge] [--interval <s>] [--level <l>]
+                                      Independent daemon: watch the repo's Crosscheck-approved PRs,
+                                      verify delivery, and (with --auto-merge) squash-merge on accept.
 
 Step-only options:
   --crosscheck-verdict <v>  Crosscheck verdict handed in by the caller (recorded, not gated on).
@@ -344,6 +354,63 @@ async function cmdDoctor(): Promise<number> {
   return report.ok ? 0 : 1;
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * `vf watch` — independent delivery-gate daemon (IN-622). Polls the repo's open PRs; for each
+ * Crosscheck-approved head not yet verified, runs verification (reusing the run executor) and,
+ * with --auto-merge, squash-merges on a clean `accept`. Loops until interrupted.
+ */
+async function cmdWatch(args: Args): Promise<number> {
+  const repo = str(args.repo);
+  if (!repo || !/^[^/]+\/[^/]+$/.test(repo)) {
+    console.error("error: vf watch needs --repo <owner/repo>\n");
+    return 2;
+  }
+  const intervalMs = Math.max(10, Number(str(args.interval) ?? "60")) * 1000;
+  const autoMerge = !!args["auto-merge"];
+  const level = str(args.level) ?? "functional";
+  const seen = new Map<number, string>();
+
+  const deps: WatchDeps = {
+    listOpenPrs: ghListOpenPrs,
+    listIssueComments: ghListIssueComments,
+    verify: async (pr) => {
+      const outcome = await executeRun({ pr: `${repo}#${pr.number}`, level, checkout: true, comment: true });
+      if (typeof outcome === "number") return { verdict: "error", merged: false };
+      const verdict = outcome.report.runVerdict;
+      let merged = false;
+      if (autoMerge && verdict === "accept") merged = await ghMergePr(repo, pr.number, pr.headSha);
+      return { verdict, merged };
+    },
+  };
+
+  console.error(
+    `[verifyflow] vf watch on ${repo} — every ${intervalMs / 1000}s, auto-merge: ${autoMerge} (Ctrl-C to stop).`,
+  );
+  let stop = false;
+  process.on("SIGINT", () => {
+    stop = true;
+    console.error("\n[verifyflow] stopping watch after the current tick…");
+  });
+  while (!stop) {
+    try {
+      const acted = await watchTick(repo, deps, seen);
+      for (const a of acted) {
+        console.error(
+          `[verifyflow] PR #${a.pr}@${a.headSha.slice(0, 8)}: verdict=${a.verdict} merged=${a.merged}` +
+            (a.error ? ` error=${a.error}` : ""),
+        );
+      }
+    } catch (err) {
+      console.error(`[verifyflow] watch tick error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (stop) break;
+    await sleep(intervalMs);
+  }
+  return 0;
+}
+
 async function main(): Promise<number> {
   const { cmd, args } = parseArgs(process.argv.slice(2));
   // `help`, `--help`/`-h` as the first token, or any `--help`/`-h` flag → usage (exit 0).
@@ -357,6 +424,7 @@ async function main(): Promise<number> {
   if (cmd === "report") return cmdReport(args);
   if (cmd === "init") return cmdInit(args);
   if (cmd === "doctor") return cmdDoctor();
+  if (cmd === "watch") return cmdWatch(args);
   console.error(`error: unknown command "${cmd}"\n`);
   console.log(USAGE);
   return 2;
