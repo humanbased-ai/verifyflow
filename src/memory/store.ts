@@ -2,6 +2,10 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { CriterionResultValue, FailureCategory, Probe, TestPoint } from "../types.js";
 
+// Slug a repo string into a single safe path segment. Dots are kept on purpose — GitHub
+// owner/repo names legitimately contain them (e.g. `my.org/some.repo`). Path separators are not
+// in the allowlist, so any `/` (or other traversal punctuation) collapses to `_`, which keeps the
+// result a single directory name and neutralizes `../`-style traversal from a `--repo` argument.
 const slug = (repo: string) => repo.replace(/[^a-zA-Z0-9._-]+/g, "_");
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -179,6 +183,10 @@ export class MemoryStore {
     for (const slugName of entries.sort()) {
       const points = await this.loadTestPointsBySlug(slugName);
       const failureModes = await this.loadFailureModesBySlug(slugName);
+      // Skip empty-but-present directories (e.g. an interrupted `clear` mid-write): they carry no
+      // test points to recover the original `owner/repo` string from, so listing them would show
+      // the hashed slug. Nothing to inspect there anyway.
+      if (points.length === 0 && failureModes.length === 0) continue;
       out.push({
         slug: slugName,
         repo: points[0]?.repo ?? slugName,
@@ -229,12 +237,14 @@ export class MemoryStore {
   async clear(repo?: string): Promise<string[]> {
     if (repo) {
       const dir = this.dir(repo);
-      const existed = await fs
-        .stat(dir)
-        .then(() => true)
-        .catch(() => false);
-      if (!existed) return [];
-      await fs.rm(dir, { recursive: true, force: true });
+      // Single rm (no `force`, so ENOENT surfaces) instead of stat→rm — no TOCTOU window. A
+      // caught ENOENT means nothing was stored for this repo.
+      try {
+        await fs.rm(dir, { recursive: true });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw err;
+      }
       return [slug(repo)];
     }
     const repos = (await this.listRepos()).map((r) => r.slug);

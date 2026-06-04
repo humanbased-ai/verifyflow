@@ -187,10 +187,14 @@ export async function runVerification(
     // buildEvaluationPlan always returns a defined `ui` for level=ui (it constructs the driver or
     // an UnavailableUiHarness itself), so the non-null assertion is the real invariant here.
     results.push(...(await runUiChecks(ui!, criteria, req.baseUrl)));
-    // `cfg` is only undefined on the `ui` branch above (which we've already handled); for the
-    // command-execution path `buildEvaluationPlan` always returns it, so the `&& cfg` here is a
-    // type-narrowing guard for the optional return field, not a real "skip if no config" branch.
-  } else if (req.workdir && cfg) {
+  } else if (req.workdir) {
+    // buildEvaluationPlan always returns a cfg for non-UI levels today. Fail loudly rather than
+    // silently skipping execution if a future level ever omits it.
+    if (!cfg) {
+      throw new Error(
+        `internal: no repo config resolved for level "${req.level}"; cannot execute probes`,
+      );
+    }
     const runner = new CommandRunner(req.workdir, artifactRoot, { isolate: req.sandbox !== false });
     for (const step of plan.steps) {
       if (step.id.startsWith("probe-")) {

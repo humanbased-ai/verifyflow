@@ -35,16 +35,27 @@ export const VERDICT_INPUTS_SCHEMA_VERSION = 1;
 
 export async function readVerdictInputs(runDir: string): Promise<VerdictInputs> {
   const raw = await fs.readFile(path.join(runDir, VERDICT_INPUTS_FILENAME), "utf8");
-  const parsed = JSON.parse(raw) as VerdictInputs;
+  const parsed = JSON.parse(raw) as Partial<VerdictInputs>;
   // Guard against replaying evidence written by an incompatible (e.g. future) version, which
   // would otherwise feed mismatched data into the engine silently (IN-625 review).
   if (parsed.schemaVersion !== VERDICT_INPUTS_SCHEMA_VERSION) {
     throw new Error(
-      `${VERDICT_INPUTS_FILENAME} schemaVersion ${parsed.schemaVersion} is not supported by this ` +
-        `build (expected ${VERDICT_INPUTS_SCHEMA_VERSION}) — recorded by an incompatible version.`,
+      `${VERDICT_INPUTS_FILENAME} schemaVersion ${String(parsed.schemaVersion)} is not supported ` +
+        `by this build (expected ${VERDICT_INPUTS_SCHEMA_VERSION}) — recorded by an incompatible version.`,
     );
   }
-  return parsed;
+  // Shallow shape check: a partially-written/corrupt file parses fine but would otherwise blow up
+  // with a confusing TypeError deep inside decideVerdict. Fail clearly at the boundary instead.
+  if (
+    typeof parsed.criteria !== "object" ||
+    parsed.criteria === null ||
+    typeof parsed.plan !== "object" ||
+    parsed.plan === null ||
+    !Array.isArray(parsed.results)
+  ) {
+    throw new Error(`corrupt ${VERDICT_INPUTS_FILENAME}: missing criteria, plan, or results`);
+  }
+  return parsed as VerdictInputs;
 }
 
 /** Re-run the verdict engine against stored evidence. No probes are executed. */

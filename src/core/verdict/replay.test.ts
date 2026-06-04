@@ -86,6 +86,13 @@ test("readVerdictInputs rejects an unsupported schemaVersion (review)", async ()
   await assert.rejects(readVerdictInputs(runDir), /schemaVersion 2 is not supported/);
 });
 
+test("readVerdictInputs rejects a corrupt/partial file (missing criteria/plan/results)", async () => {
+  const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "vf-replay-corrupt-"));
+  // Valid version, but truncated before the payload was written.
+  await fs.writeFile(path.join(runDir, VERDICT_INPUTS_FILENAME), JSON.stringify({ schemaVersion: 1 }));
+  await assert.rejects(readVerdictInputs(runDir), /corrupt verdict-inputs\.json/);
+});
+
 // AC-5: `vf replay` must derive the verdict from *stored* evidence without re-executing any
 // probe/test subprocess. That negative guarantee can't be read off CLI output (PR #28 review), so
 // we assert it behaviorally: the stored evidence is a PASS whose probe command points at a binary
