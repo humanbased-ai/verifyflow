@@ -211,6 +211,13 @@ export interface HarnessResult {
   executed: boolean;
   /** True when the step was killed for exceeding its time budget (treated as environment/flake, not product fail). */
   timedOut: boolean;
+  /**
+   * True when the probe self-check (IN-552) replaced the planned command with an LLM-regenerated
+   * one. The executed command is then agent-invented, NOT ticket-quoted — so even if the
+   * criterion's original probe was authoritative (`fromTicket`), this result must not be treated
+   * as authoritative: its failure can only mean "could not verify", never a product `fail` (IN-620).
+   */
+  probeRegenerated?: boolean;
   evidence: Evidence[];
 }
 
