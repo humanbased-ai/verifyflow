@@ -408,9 +408,9 @@ async function cmdDryRun(args: Args): Promise<number> {
     memory: new MemoryStore(outputRoot),
     eventLog: new EventLog(outputRoot),
   };
-  // `--linear` is implicitly required unless `--allow-no-ticket`: resolveContext (shared with the
-  // real run) falls back to the key embedded in the PR, then throws a clear message if it finds
-  // none. Surface that as a clean error here rather than letting it bubble up as a stack trace.
+  // `--linear` is optional: when omitted, resolveContext derives the issue key from the PR body or
+  // branch (and --allow-no-ticket enables degraded mode). If neither yields a ticket, surface that
+  // clear, actionable message and exit 2 — never a fatal stack trace from deep in the pipeline.
   let preview: PlanPreview;
   try {
     preview = await planRun(request, deps);
@@ -418,7 +418,8 @@ async function cmdDryRun(args: Args): Promise<number> {
     console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
     return 2;
   }
-  console.log(renderPlanPreview(preview));
+  // `--json` emits the machine-readable preview for tooling; the default markdown is for humans.
+  console.log(args.json ? JSON.stringify(preview, null, 2) : renderPlanPreview(preview));
   return 0;
 }
 

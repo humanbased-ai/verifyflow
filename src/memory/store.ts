@@ -237,6 +237,18 @@ export class MemoryStore {
   async clear(repo?: string): Promise<string[]> {
     if (repo) {
       const dir = this.dir(repo);
+      // Defence in depth: slug() already strips path separators, so traversal can't reach outside
+      // the store today — but assert that invariant explicitly so a future slug() change can't turn
+      // `clear()` into an arbitrary `rm`. The resolved dir must stay strictly inside <root>/memory.
+      const memRoot = path.join(this.root, "memory");
+      const rel = path.relative(memRoot, dir);
+      // Compare on path segments, not the raw string: a legitimate slug can begin with ".." (e.g.
+      // `.._.._x`) yet still resolve inside the store. Traversal means an upward `..` segment or an
+      // absolute path; the empty rel means `dir` IS the memory root (would wipe everything).
+      const escapes = rel === "" || rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+      if (escapes) {
+        throw new Error(`refusing to clear memory outside the store: ${repo}`);
+      }
       // Single rm (no `force`, so ENOENT surfaces) instead of stat→rm — no TOCTOU window. A
       // caught ENOENT means nothing was stored for this repo.
       try {

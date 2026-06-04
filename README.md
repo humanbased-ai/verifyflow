@@ -119,7 +119,7 @@ vf run --linear <KEY|url> --pr <url|owner/repo#N|#N> --level <functional|ui> [op
 | `--allow-no-ticket` | Degraded mode: verify against the PR's own description; verdict capped at `manual_review_required`. |
 | `--out <dir>` | Output root for reports/artifacts/memory (default `./.verifyflow`). |
 | `--model <m>` | Model for the `claude` backend. |
-| `--dry-run` | Resolve criteria + build the plan and print it, **without executing** anything (no checkout). Cost-free "how would it verify this?" inspection; exits `0`. |
+| `--dry-run` | Resolve criteria + build the plan and print it, **without executing** anything (no checkout). Cost-free "how would it verify this?" inspection; exits `0`. Combine with `--json` for a machine-readable preview. |
 
 Exit code is `0` unless a gating policy blocks the merge (then `1`).
 

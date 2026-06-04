@@ -50,7 +50,13 @@ export function filterEvents(events: QualityEvent[], filter: MetricsFilter = {})
   });
 }
 
-/** Per-day run-verdict counts, oldest first — a simple over-time trend for `vf report`. */
+/**
+ * Per-day run-verdict counts, oldest first — a simple over-time trend for `vf report`.
+ *
+ * Days are bucketed by the UTC date of the event's `ts` (parsed, then re-rendered via
+ * `toISOString().slice(0,10)`), so the boundary is a UTC day — runs near local midnight bucket by
+ * their UTC date, not the operator's local date.
+ */
 export function computeTrend(events: QualityEvent[]): Array<{ date: string; runs: number; verdicts: Record<string, number> }> {
   const byDay = new Map<string, { runs: number; verdicts: Record<string, number> }>();
   for (const e of events) {

@@ -11,7 +11,7 @@ import { decideVerdict, type VerdictOutput } from "./engine.js";
  * capturing them is sufficient to reproduce (or re-derive, after a logic change) any verdict.
  */
 export interface VerdictInputs {
-  schemaVersion: 1;
+  schemaVersion: typeof VERDICT_INPUTS_SCHEMA_VERSION;
   criteria: CriteriaModel;
   plan: EvaluationPlan;
   results: HarnessResult[];
@@ -25,12 +25,14 @@ export async function writeVerdictInputs(
 ): Promise<string> {
   await fs.mkdir(runDir, { recursive: true });
   const p = path.join(runDir, VERDICT_INPUTS_FILENAME);
-  const payload: VerdictInputs = { schemaVersion: 1, ...inputs };
+  const payload: VerdictInputs = { schemaVersion: VERDICT_INPUTS_SCHEMA_VERSION, ...inputs };
   await fs.writeFile(p, JSON.stringify(payload, null, 2) + "\n");
   return p;
 }
 
-/** The schema version this build knows how to replay. */
+/** The schema version this build knows how to replay. The `VerdictInputs.schemaVersion` field is
+ * typed as `typeof` this literal and `writeVerdictInputs` stamps it, so the constant and the
+ * written value can't drift apart. Bump when the persisted shape changes. */
 export const VERDICT_INPUTS_SCHEMA_VERSION = 1;
 
 export async function readVerdictInputs(runDir: string): Promise<VerdictInputs> {

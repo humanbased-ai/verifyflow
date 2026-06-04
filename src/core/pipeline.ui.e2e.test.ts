@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { runVerification, type PipelineDeps } from "./pipeline.js";
+import { runVerification, planRun, type PipelineDeps } from "./pipeline.js";
 import { FixtureGithubClient } from "./context/github.js";
 import { FixtureLinearClient } from "./context/linear.js";
 import { FallbackLlm } from "../backends/fallbackLlm.js";
@@ -66,4 +66,23 @@ test("ui e2e: no browser driver wired → criteria blocked, not falsely passed",
   const { report } = await runVerification(request(out), deps(out)); // default UnavailableUiHarness
   assert.ok(report.criterionResults.every((c) => c.result === "blocked"));
   assert.equal(report.runVerdict, "manual_review_required");
+});
+
+test("IN-625: ui dry-run plans without constructing the execution harness (no fake artifactRoot)", async () => {
+  const out = await fs.mkdtemp(path.join(os.tmpdir(), "vf-ui-dry-"));
+  // The factory must NOT be invoked during plan-only: a real driver could touch the filesystem.
+  let factoryCalls = 0;
+  const d: PipelineDeps = {
+    ...deps(out),
+    uiHarnessFactory: (artifactRoot) => {
+      factoryCalls++;
+      assert.notEqual(artifactRoot, "(dry-run)", "plan-only must not pass a fake artifactRoot");
+      return allPass;
+    },
+  };
+  const preview = await planRun(request(out), d);
+  assert.equal(factoryCalls, 0, "dry-run must not build the ui execution harness");
+  assert.equal(preview.plan.level, "ui");
+  assert.ok(preview.plan.steps.length > 0, "ui plan still lists planned checks");
+  assert.ok(preview.plan.notes.some((n) => /browser-driven checks/.test(n)), "ui plan keeps its note");
 });

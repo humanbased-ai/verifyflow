@@ -48,3 +48,65 @@ test("e2e: vf run --dry-run requires --pr", async () => {
     (err: Error & { code?: number }) => err.code === 2,
   );
 });
+
+test("e2e: vf run --dry-run with no resolvable ticket exits 2 with a clean message (not a stack trace)", async () => {
+  // Offline fixtures whose PR carries no Linear key, no --linear, no --allow-no-ticket: the issue
+  // can't be resolved. cmdDryRun must surface the actionable message and exit 2 — not a fatal trace.
+  const out = await fs.mkdtemp(path.join(os.tmpdir(), "vf-dry-noticket-"));
+  const fx = await fs.mkdtemp(path.join(os.tmpdir(), "vf-dry-fx-"));
+  await fs.writeFile(
+    path.join(fx, "pr.json"),
+    JSON.stringify({
+      repo: "owner/repo",
+      number: 1,
+      title: "no ticket here",
+      body: "nothing linkable",
+      url: "https://example/pr/1",
+      headRef: "feature",
+      headSha: "0".repeat(12),
+      baseRef: "main",
+      changedFiles: [],
+      diff: "",
+      source: "fixture",
+    }),
+  );
+  await assert.rejects(
+    exec(
+      process.execPath,
+      ["--import", "tsx", "src/cli/main.ts", "run", "--dry-run", "--fixtures", fx, "--pr", "owner/repo#1", "--out", out],
+      { cwd: repoRoot },
+    ),
+    (err: Error & { code?: number; stderr?: string }) =>
+      err.code === 2 &&
+      /No Linear issue provided/.test(err.stderr ?? "") &&
+      !/at .*\(.*:\d+:\d+\)/.test(err.stderr ?? ""),
+  );
+});
+
+test("e2e: vf run --dry-run --json emits a machine-readable preview", async () => {
+  const out = await fs.mkdtemp(path.join(os.tmpdir(), "vf-dry-json-"));
+  const { stdout } = await exec(
+    process.execPath,
+    [
+      "--import", "tsx",
+      "src/cli/main.ts",
+      "run",
+      "--dry-run",
+      "--json",
+      "--fixtures", "fixtures/example-cli",
+      "--pr", "https://github.com/example/greet/pull/7",
+      "--workdir", "examples/example-target",
+      "--out", out,
+    ],
+    { cwd: repoRoot },
+  );
+
+  const preview = JSON.parse(stdout) as {
+    issue: { key: string };
+    criteria: { criteria: unknown[] };
+    plan: { steps: unknown[] };
+  };
+  assert.equal(preview.issue.key, "EX-1");
+  assert.ok(Array.isArray(preview.criteria.criteria));
+  assert.ok(Array.isArray(preview.plan.steps));
+});

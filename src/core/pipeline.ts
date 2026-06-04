@@ -103,12 +103,20 @@ async function buildEvaluationPlan(
   deps: PipelineDeps,
   criteria: CriteriaModel,
   pr: PrContext,
-  artifactRoot: string,
+  // The artifact root for an executing harness, or `undefined` for plan-only mode (`--dry-run`):
+  // no probes/tests run, so no execution harness is constructed and nothing touches the filesystem.
+  artifactRoot?: string,
 ): Promise<{ plan: EvaluationPlan; repoConfigSource: string; ui?: UiHarness; cfg?: RepoConfig }> {
   if (req.level === "ui") {
     // UI level: browser-driven checks (IN-559). The browser is an execution backend behind the
     // UiHarness seam; until a real driver is wired the default reports checks as not executed.
-    const ui = deps.uiHarnessFactory?.(artifactRoot) ?? deps.uiHarness ?? new UnavailableUiHarness();
+    // In plan-only mode we never execute, so we must NOT construct a real driver — its constructor
+    // may have filesystem side effects (e.g. creating `<artifactRoot>/artifacts`).
+    const ui =
+      artifactRoot === undefined
+        ? undefined
+        : deps.uiHarnessFactory?.(artifactRoot) ?? deps.uiHarness ?? new UnavailableUiHarness();
+    const harnessName = ui?.name ?? deps.uiHarness?.name ?? "browser harness";
     // UI checks are judged by the browser (pass/fail), not by stdout. Replace any command-probe
     // a criterion picked up with a clean ui marker so the engine scores exit 0 = pass / 1 = fail
     // and never compares against a stdout substring meant for a CLI probe.
@@ -126,7 +134,7 @@ async function buildEvaluationPlan(
           criterionIds: [c.id],
           reusedTestPoint: false,
         })),
-      notes: [`ui level: browser-driven checks via ${ui.name}`],
+      notes: [`ui level: browser-driven checks via ${harnessName}`],
     };
     return { plan, repoConfigSource: "n/a", ui };
   }
@@ -151,8 +159,8 @@ export interface PlanPreview {
 export async function planRun(req: RunRequest, deps: PipelineDeps): Promise<PlanPreview> {
   const { pr, issue, degraded } = await resolveContext(req, deps);
   const criteria = await parseCriteria(issue, pr, deps.llm);
-  // No run dir in dry-run; the artifact root is only consulted by an executing ui harness.
-  const { plan } = await buildEvaluationPlan(req, deps, criteria, pr, "(dry-run)");
+  // Plan-only: no run dir, no artifact root — buildEvaluationPlan constructs no execution harness.
+  const { plan } = await buildEvaluationPlan(req, deps, criteria, pr);
   return { pr, issue, criteria, plan, degraded };
 }
 
