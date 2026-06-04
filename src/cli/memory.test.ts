@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { MemoryStore } from "../memory/store.js";
-import { memoryLs, memoryShow, memoryClear } from "./memory.js";
+import { memoryLs, memoryShow, memoryClear, isValidRepoArg } from "./memory.js";
 
 async function seeded(): Promise<{ store: MemoryStore; root: string }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "vf-mem-cli-"));
@@ -65,6 +65,15 @@ test("memory show on an unknown key is not found", async () => {
   const res = await memoryShow(store, "does-not-exist");
   assert.equal(res.found, false);
   assert.match(res.text, /no test point/);
+});
+
+test("IN-625 review: isValidRepoArg accepts owner/repo and rejects traversal-capable values", () => {
+  for (const ok of ["acme/app", "other/repo", "a.b_c-d/x.y_z-1"]) {
+    assert.equal(isValidRepoArg(ok), true, `expected "${ok}" to be valid`);
+  }
+  for (const bad of ["", "..", "no-slash", "../../sensitive", "a/b/c", "a//b", " acme/app "]) {
+    assert.equal(isValidRepoArg(bad), false, `expected "${bad}" to be rejected`);
+  }
 });
 
 test("memory clear --repo removes only that repo", async () => {

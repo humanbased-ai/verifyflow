@@ -28,7 +28,7 @@ import { readVerdictInputs, replayVerdict } from "../core/verdict/replay.js";
 import { buildStepSummary } from "./step.js";
 import { runInit } from "./init.js";
 import { runDoctor, renderDoctorReport } from "./doctor.js";
-import { memoryLs, memoryShow, memoryClear } from "./memory.js";
+import { memoryLs, memoryShow, memoryClear, isValidRepoArg } from "./memory.js";
 import { showRun, showSignal, isUnsafeRunId } from "./inspect.js";
 import {
   watchTick,
@@ -398,6 +398,9 @@ async function cmdDryRun(args: Args): Promise<number> {
     workdir: str(args.workdir) ? path.resolve(str(args.workdir)!) : undefined,
     allowNoTicket: !!args["allow-no-ticket"],
   };
+  // planRun only reads from memory (to surface reused test points); it never writes, and the
+  // EventLog here is never appended to. Both are constructed only to satisfy PipelineDeps — dry-run
+  // stays side-effect-free, consistent with the "prints the plan, runs nothing" contract.
   const deps: PipelineDeps = {
     linear: clients.linear,
     github: clients.github,
@@ -547,6 +550,10 @@ async function cmdMemory(args: Args, positionals: string[]): Promise<number> {
   }
   if (sub === "clear") {
     const repo = str(args.repo);
+    if (repo !== undefined && !isValidRepoArg(repo)) {
+      console.error(`error: --repo must look like owner/repo (got "${repo}").`);
+      return 2;
+    }
     if (!args.yes) {
       const scope = repo ? `memory for ${repo}` : "ALL reusable test-point memory";
       const ok = await confirm(`This will delete ${scope} under ${outputRoot}. Continue? [y/N] `);

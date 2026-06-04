@@ -12,6 +12,16 @@ import type { TestPoint } from "../types.js";
  *   vf memory clear [--repo ...]  delete memory (one repo, or all); asks to confirm unless --yes
  */
 
+/**
+ * Validate a `--repo` argument before it reaches `store.clear → slug() → fs.rm(recursive)`.
+ * Only `owner/repo` shapes (the chars `slug()` preserves, plus a single separating slash) are
+ * accepted, so a crafted value such as `..` can never construct a path outside the memory tree
+ * (IN-625 review).
+ */
+export function isValidRepoArg(repo: string): boolean {
+  return /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repo);
+}
+
 export interface MemoryLsResult {
   text: string;
   json: unknown;
