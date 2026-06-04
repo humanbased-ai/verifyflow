@@ -1,10 +1,12 @@
 import path from "node:path";
 import type {
+  CriteriaModel,
   CriterionResult,
   EvaluationPlan,
   HarnessResult,
   IssueContext,
   PlanStep,
+  PrContext,
   QualityEvent,
   RunReport,
   RunRequest,
@@ -25,6 +27,7 @@ import { CommandRunner } from "../harness/commandRunner.js";
 import { regenerateProbe } from "../harness/probeFix.js";
 import { looksLikeHarnessError } from "../util/harnessError.js";
 import { decideVerdict } from "./verdict/engine.js";
+import { writeVerdictInputs } from "./verdict/replay.js";
 import { writeReports, type WriteReportResult } from "./reporting/reporter.js";
 import { buildImprovementSignal, writeImprovementSignal } from "./reporting/improvementSignal.js";
 
@@ -53,14 +56,14 @@ export interface PipelineOutput {
   signalPath?: string;
 }
 
-export async function runVerification(
+/**
+ * Resolve the run context: load the PR (reference) and the Linear issue (source of truth),
+ * applying degraded no-ticket mode (IN-570). Shared by `runVerification` and `planRun`.
+ */
+async function resolveContext(
   req: RunRequest,
   deps: PipelineDeps,
-): Promise<PipelineOutput> {
-  const now = deps.clock ?? (() => new Date().toISOString());
-  const startedAt = now();
-
-  // --- Context: PR is reference, Linear issue is the source of truth -------------------
+): Promise<{ pr: PrContext; issue: IssueContext; degraded: boolean }> {
   const prRef: PrRef = parsePrRef(req.pullRequest);
   const pr = await deps.github.loadPr(prRef);
 
@@ -87,19 +90,21 @@ export async function runVerification(
         source: "pr-degraded",
       }
     : await deps.linear.loadIssue(issueKey!);
+  return { pr, issue, degraded };
+}
 
-  // --- Criteria (from the issue) ------------------------------------------------------
-  const criteria = await parseCriteria(issue, pr, deps.llm);
-
-  const runId = `${issue.key}_pr${pr.number}_${startedAt.replace(/[^0-9]/g, "").slice(0, 14)}`;
-  const runDir = path.join(req.outputRoot, "runs", runId);
-  const artifactRoot = path.join(runDir, "artifacts");
-
-  // --- Plan + real execution (level-specific) -----------------------------------------
-  let plan: EvaluationPlan;
-  const results: HarnessResult[] = [];
-  let repoConfigSource = "n/a";
-
+/**
+ * Build the evaluation plan for a level WITHOUT executing it. For ui level this also stamps the
+ * criteria with ui-check probes and returns the harness so execution can reuse it; for functional
+ * it returns the resolved repo config the execution loop needs. Pure planning — no subprocesses.
+ */
+async function buildEvaluationPlan(
+  req: RunRequest,
+  deps: PipelineDeps,
+  criteria: CriteriaModel,
+  pr: PrContext,
+  artifactRoot: string,
+): Promise<{ plan: EvaluationPlan; repoConfigSource: string; ui?: UiHarness; cfg?: RepoConfig }> {
   if (req.level === "ui") {
     // UI level: browser-driven checks (IN-559). The browser is an execution backend behind the
     // UiHarness seam; until a real driver is wired the default reports checks as not executed.
@@ -110,7 +115,7 @@ export async function runVerification(
     for (const c of criteria.criteria) {
       if (c.observable) c.probe = { command: `ui-check: ${c.text}`, fromTicket: true };
     }
-    plan = {
+    const plan: EvaluationPlan = {
       level: "ui",
       steps: criteria.criteria
         .filter((c) => c.observable)
@@ -123,25 +128,76 @@ export async function runVerification(
         })),
       notes: [`ui level: browser-driven checks via ${ui.name}`],
     };
-    results.push(...(await runUiChecks(ui, criteria, req.baseUrl)));
-  } else {
-    const cfg = await loadRepoConfig(req.workdir);
-    repoConfigSource = cfg.source;
-    plan = await buildPlan(req.level, criteria, pr, cfg, deps.memory);
-    if (req.workdir) {
-      const runner = new CommandRunner(req.workdir, artifactRoot, { isolate: req.sandbox !== false });
-      for (const step of plan.steps) {
-        if (step.id.startsWith("probe-")) {
-          const criterionText = criteria.criteria.find((c) => c.id === step.criterionIds[0])?.text;
-          results.push(await runProbeWithSelfCheck(runner, step, criterionText, cfg, deps.llm));
-        } else {
-          results.push(await runner.runStep(step));
-        }
-        // Stop spending on probes/tests if environment setup failed hard.
-        if (step.id.startsWith("setup-")) {
-          const last = results[results.length - 1]!;
-          if (!last.executed || last.exitCode !== 0) break;
-        }
+    return { plan, repoConfigSource: "n/a", ui };
+  }
+  const cfg = await loadRepoConfig(req.workdir);
+  const plan = await buildPlan(req.level, criteria, pr, cfg, deps.memory);
+  return { plan, repoConfigSource: cfg.source, cfg };
+}
+
+export interface PlanPreview {
+  issue: IssueContext;
+  criteria: CriteriaModel;
+  plan: EvaluationPlan;
+  degraded: boolean;
+}
+
+/**
+ * Resolve context + parse criteria + build the plan, and stop — `vf run --dry-run` (IN-625).
+ * Executes no probes/tests, performs no checkout, writes nothing. Lets a user inspect "how would
+ * VerifyFlow verify this?" for free before paying for a real run.
+ */
+export async function planRun(req: RunRequest, deps: PipelineDeps): Promise<PlanPreview> {
+  const { issue, degraded } = await resolveContext(req, deps);
+  const pr = await deps.github.loadPr(parsePrRef(req.pullRequest));
+  const criteria = await parseCriteria(issue, pr, deps.llm);
+  // No run dir in dry-run; the artifact root is only consulted by an executing ui harness.
+  const { plan } = await buildEvaluationPlan(req, deps, criteria, pr, "(dry-run)");
+  return { issue, criteria, plan, degraded };
+}
+
+export async function runVerification(
+  req: RunRequest,
+  deps: PipelineDeps,
+): Promise<PipelineOutput> {
+  const now = deps.clock ?? (() => new Date().toISOString());
+  const startedAt = now();
+
+  // --- Context: PR is reference, Linear issue is the source of truth -------------------
+  const { pr, issue, degraded } = await resolveContext(req, deps);
+
+  // --- Criteria (from the issue) ------------------------------------------------------
+  const criteria = await parseCriteria(issue, pr, deps.llm);
+
+  const runId = `${issue.key}_pr${pr.number}_${startedAt.replace(/[^0-9]/g, "").slice(0, 14)}`;
+  const runDir = path.join(req.outputRoot, "runs", runId);
+  const artifactRoot = path.join(runDir, "artifacts");
+
+  // --- Plan + real execution (level-specific) -----------------------------------------
+  const { plan, repoConfigSource, ui, cfg } = await buildEvaluationPlan(
+    req,
+    deps,
+    criteria,
+    pr,
+    artifactRoot,
+  );
+  const results: HarnessResult[] = [];
+
+  if (req.level === "ui") {
+    results.push(...(await runUiChecks(ui ?? new UnavailableUiHarness(), criteria, req.baseUrl)));
+  } else if (req.workdir && cfg) {
+    const runner = new CommandRunner(req.workdir, artifactRoot, { isolate: req.sandbox !== false });
+    for (const step of plan.steps) {
+      if (step.id.startsWith("probe-")) {
+        const criterionText = criteria.criteria.find((c) => c.id === step.criterionIds[0])?.text;
+        results.push(await runProbeWithSelfCheck(runner, step, criterionText, cfg, deps.llm));
+      } else {
+        results.push(await runner.runStep(step));
+      }
+      // Stop spending on probes/tests if environment setup failed hard.
+      if (step.id.startsWith("setup-")) {
+        const last = results[results.length - 1]!;
+        if (!last.executed || last.exitCode !== 0) break;
       }
     }
   }
@@ -206,6 +262,10 @@ export async function runVerification(
   await persistMemoryAndEvents(req, deps, report, criteria, plan, results, component, finishedAt);
 
   const reportPaths = await writeReports(report, runDir);
+
+  // Persist the verdict engine's inputs so `vf replay <runId>` can re-derive the verdict from
+  // stored evidence without re-executing any probe/test (IN-625).
+  await writeVerdictInputs({ criteria, plan, results }, runDir);
 
   // Bounce-back (IN-554): emit a machine-consumable signal a coding agent can act on.
   const signal = buildImprovementSignal(report, criteria.criteria, results);

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { runVerification, type PipelineDeps } from "../core/pipeline.js";
+import { createInterface } from "node:readline/promises";
+import { runVerification, planRun, type PipelineDeps, type PlanPreview } from "../core/pipeline.js";
 import type { Level, Policy, RunRequest } from "../types.js";
 import { GhCliClient, FixtureGithubClient, parsePrRef } from "../core/context/github.js";
 import { FixtureLinearClient, LinearApiClient, type LinearClient } from "../core/context/linear.js";
@@ -16,10 +17,19 @@ import { PlaywrightBrowserDriver } from "../harness/ui/browserDriver.js";
 import { AgenticUiHarness } from "../harness/ui/agenticUiHarness.js";
 import type { UiHarness } from "../harness/ui/uiHarness.js";
 import { renderMarkdown, postPrComment } from "../core/reporting/reporter.js";
-import { computeMetrics, renderMetricsMarkdown } from "../core/reporting/metrics.js";
+import {
+  computeMetrics,
+  renderMetricsMarkdown,
+  filterEvents,
+  computeTrend,
+  renderTrendMarkdown,
+} from "../core/reporting/metrics.js";
+import { readVerdictInputs, replayVerdict } from "../core/verdict/replay.js";
 import { buildStepSummary } from "./step.js";
 import { runInit } from "./init.js";
 import { runDoctor, renderDoctorReport } from "./doctor.js";
+import { memoryLs, memoryShow, memoryClear } from "./memory.js";
+import { showRun, showSignal } from "./inspect.js";
 import {
   watchTick,
   ghListOpenPrs,
@@ -32,13 +42,29 @@ const USAGE = `verifyflow — evidence-backed delivery verification
 
 Usage:
   vf run    --linear <KEY|url> --pr <url|owner/repo#N|#N> --level <functional|ui|journey> [options]
+                                      Add --dry-run to print the resolved criteria + planned probes
+                                      without executing anything (no checkout, exits 0).
   vf step   --pr <url> [options]      Orchestrator-facing step (Symphony, IN-569): advisory-only,
                                       auto-resolves the Linear issue from the PR (body or branch),
                                       checks out + executes + posts the report comment, and prints
                                       a single machine-readable JSON line to stdout. Never blocks.
-  vf report [--out <dir>] [--json]    Aggregate accumulated runs into quality-intelligence metrics.
+  vf report [--out <dir>] [--json] [--since <date>] [--repo <owner/repo>] [--level <l>] [--trend]
+                                      Aggregate accumulated runs into quality-intelligence metrics,
+                                      scoped by the given filters.
+  vf memory ls                        List repos with stored reusable test points + counts.
+  vf memory show <key>                Dump a single stored test point (by its id).
+  vf memory clear [--repo <o/r>] [--yes]
+                                      Prune the reusable test-point memory (one repo, or all).
+  vf replay <runId> [--out <dir>] [--json]
+                                      Re-run the verdict engine against a past run's stored evidence
+                                      — no probes/tests are executed.
+  vf show   <runId> [--out <dir>] [--json]
+                                      Re-render a past run's report.md (or report.json).
+  vf signal <runId> [--out <dir>] [--json]
+                                      Pretty-print a past run's improvement-signal.json.
   vf init [--dir <path>]              Scaffold a verifyflow.config.json (default: current directory).
-  vf doctor                           Check that required tools (gh, claude, uv, LINEAR_API_KEY) are ready.
+  vf doctor                           Check tools/env are ready (gh, claude, uv, LINEAR_API_KEY,
+                                      docker/podman for sandbox, Playwright for --level ui).
   vf watch  --repo <owner/repo> [--auto-merge] [--interval <s>] [--level <l>]
                                       Independent daemon: watch the repo's Crosscheck-approved PRs,
                                       verify delivery, and (with --auto-merge) squash-merge on accept.
@@ -69,6 +95,7 @@ Options:
   --no-sandbox           Pass host env (incl. secrets) to probes. Default: strip secrets.
   --allow-no-ticket      Degraded mode when no Linear issue can be resolved: verify against
                          the PR's own description; verdict capped at manual_review_required.
+  --dry-run              (run) Resolve criteria + build the plan and print it, without executing.
   -h, --help             Show this help.
 
 Auth model: VerifyFlow stores no secrets. It uses the authorized CLIs you have installed —
@@ -79,9 +106,10 @@ interface Args {
   [k: string]: string | boolean | undefined;
 }
 
-function parseArgs(argv: string[]): { cmd: string; args: Args } {
+function parseArgs(argv: string[]): { cmd: string; args: Args; positionals: string[] } {
   const cmd = argv[0] ?? "";
   const args: Args = {};
+  const positionals: string[] = [];
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "-h" || a === "--help") args.help = true;
@@ -93,9 +121,11 @@ function parseArgs(argv: string[]): { cmd: string; args: Args } {
         args[key] = next;
         i++;
       }
+    } else {
+      positionals.push(a);
     }
   }
-  return { cmd, args };
+  return { cmd, args, positionals };
 }
 
 function str(v: string | boolean | undefined): string | undefined {
@@ -107,6 +137,30 @@ async function buildLlm(args: Args): Promise<LlmClient> {
   if (await claude.available()) return claude;
   console.error("[verifyflow] claude CLI not found — using deterministic fallback (rules only).");
   return new FallbackLlm();
+}
+
+/**
+ * Build the Linear + GitHub context clients honoring --fixtures (offline) vs live mode. Returns
+ * an exit code on a usage error (e.g. live mode without LINEAR_API_KEY). Shared by `run`/`step`
+ * (execution) and `run --dry-run` (planning only).
+ */
+function buildContextClients(
+  args: Args,
+): { linear: LinearClient; github: GhCliClient | FixtureGithubClient; fixtures?: string } | number {
+  const fixtures = str(args.fixtures);
+  if (fixtures) {
+    const dir = path.resolve(fixtures);
+    return { linear: new FixtureLinearClient(dir), github: new FixtureGithubClient(dir), fixtures };
+  }
+  const key = process.env.LINEAR_API_KEY;
+  if (!key) {
+    console.error(
+      "error: live mode needs LINEAR_API_KEY (Linear is the criteria source). " +
+        "Use --fixtures <dir> for offline runs, or capture the issue via the Linear connector.",
+    );
+    return 2;
+  }
+  return { linear: new LinearApiClient(key), github: new GhCliClient() };
 }
 
 interface RunOutcome {
@@ -142,27 +196,10 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     console.error(`error: unknown --policy "${policy}" (expected advisory | merge_gate | strict).`);
     return 2;
   }
-  const fixtures = str(args.fixtures);
-
   // Build context clients.
-  let linear: LinearClient;
-  let github;
-  if (fixtures) {
-    const dir = path.resolve(fixtures);
-    linear = new FixtureLinearClient(dir);
-    github = new FixtureGithubClient(dir);
-  } else {
-    github = new GhCliClient();
-    const key = process.env.LINEAR_API_KEY;
-    if (!key) {
-      console.error(
-        "error: live mode needs LINEAR_API_KEY (Linear is the criteria source). " +
-          "Use --fixtures <dir> for offline runs, or capture the issue via the Linear connector.",
-      );
-      return 2;
-    }
-    linear = new LinearApiClient(key);
-  }
+  const clients = buildContextClients(args);
+  if (typeof clients === "number") return clients;
+  const { linear, github, fixtures } = clients;
 
   const llm = await buildLlm(args);
 
@@ -281,12 +318,93 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
 }
 
 async function cmdRun(args: Args): Promise<number> {
+  if (args["dry-run"]) return cmdDryRun(args);
+
   const outcome = await executeRun(args);
   if (typeof outcome === "number") return outcome;
 
   console.log(renderMarkdown(outcome.report));
 
   if (outcome.report.gate?.blocked) return 1;
+  return 0;
+}
+
+/** Render a `vf run --dry-run` plan preview for the terminal. */
+function renderPlanPreview(p: PlanPreview): string {
+  const lines: string[] = [];
+  lines.push(`# Dry run — ${p.issue.key}: ${p.issue.title}`);
+  if (p.degraded) lines.push("> ⚠️ degraded (no ticket): criteria derived from the PR's own description.");
+  lines.push("");
+  lines.push(`## Resolved acceptance criteria (${p.criteria.criteria.length})`);
+  for (const c of p.criteria.criteria) {
+    const flags = `${c.source}, ${c.method}, ${c.observable ? "observable" : "not observable"}`;
+    lines.push(`- ${c.id} [${flags}]: ${c.text}`);
+    if (c.probe) lines.push(`    probe: ${c.probe.command}${c.probe.fromTicket ? " (from ticket)" : ""}`);
+  }
+  if (p.criteria.ticketQualityIssues.length) {
+    lines.push("");
+    lines.push("## Ticket quality notes");
+    for (const q of p.criteria.ticketQualityIssues) lines.push(`- ${q}`);
+  }
+  lines.push("");
+  lines.push(`## Planned steps (${p.plan.steps.length}) — level ${p.plan.level}`);
+  if (p.plan.environmentUnknown) lines.push(`> environment unknown: ${p.plan.environmentUnknown.reason}`);
+  for (const s of p.plan.steps) {
+    const tag = s.reusedTestPoint ? " _(reused memory test point)_" : "";
+    lines.push(`- ${s.id}: ${s.description}${tag}${s.command ? ` → ${s.command}` : ""}`);
+  }
+  if (p.plan.notes.length) {
+    lines.push("");
+    lines.push("## Plan notes");
+    for (const n of p.plan.notes) lines.push(`- ${n}`);
+  }
+  if (p.plan.escalationRecommended) {
+    lines.push("");
+    lines.push(
+      `> escalation recommended to ${p.plan.escalationRecommended.toLevel}: ${p.plan.escalationRecommended.reason}`,
+    );
+  }
+  lines.push("");
+  lines.push("(dry run — no probes or tests were executed.)");
+  return lines.join("\n");
+}
+
+/** `vf run --dry-run` (IN-625): resolve criteria + build the plan, print it, run nothing. */
+async function cmdDryRun(args: Args): Promise<number> {
+  const pr = str(args.pr);
+  const level = (str(args.level) ?? "functional") as Level;
+  if (!pr) {
+    console.error("error: --pr is required\n");
+    console.error(USAGE);
+    return 2;
+  }
+  if (level !== "functional" && level !== "ui") {
+    console.error(`error: level "${level}" is not implemented yet (functional, ui).`);
+    return 2;
+  }
+  const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
+  const clients = buildContextClients(args);
+  if (typeof clients === "number") return clients;
+  const llm = await buildLlm(args);
+
+  const request: RunRequest = {
+    linearIssue: str(args.linear) ?? "",
+    pullRequest: pr,
+    level,
+    policy: "advisory",
+    outputRoot,
+    workdir: str(args.workdir) ? path.resolve(str(args.workdir)!) : undefined,
+    allowNoTicket: !!args["allow-no-ticket"],
+  };
+  const deps: PipelineDeps = {
+    linear: clients.linear,
+    github: clients.github,
+    llm,
+    memory: new MemoryStore(outputRoot),
+    eventLog: new EventLog(outputRoot),
+  };
+  const preview = await planRun(request, deps);
+  console.log(renderPlanPreview(preview));
   return 0;
 }
 
@@ -324,13 +442,40 @@ async function cmdStep(args: Args): Promise<number> {
 
 async function cmdReport(args: Args): Promise<number> {
   const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
-  const events = await new EventLog(outputRoot).readAll();
-  if (events.length === 0) {
+  const all = await new EventLog(outputRoot).readAll();
+  if (all.length === 0) {
     console.error(`[verifyflow] no events found under ${outputRoot} — run \`vf run\` first.`);
     return 0;
   }
+  // Scope filters (IN-625): narrow the event log before computing metrics.
+  const filter = { since: str(args.since), repo: str(args.repo), level: str(args.level) };
+  const events = filterEvents(all, filter);
+  const scoped = Object.values(filter).some(Boolean);
+  if (events.length === 0) {
+    console.error(
+      `[verifyflow] no events match the given filter (since=${filter.since ?? "-"}, ` +
+        `repo=${filter.repo ?? "-"}, level=${filter.level ?? "-"}).`,
+    );
+    return 0;
+  }
   const metrics = computeMetrics(events);
-  console.log(args.json ? JSON.stringify(metrics, null, 2) : renderMetricsMarkdown(metrics));
+  const wantTrend = !!args.trend;
+  if (args.json) {
+    const payload = wantTrend ? { ...metrics, trend: computeTrend(events) } : metrics;
+    console.log(JSON.stringify(payload, null, 2));
+    return 0;
+  }
+  if (scoped) {
+    const f = [
+      filter.since ? `since ${filter.since}` : null,
+      filter.repo ? `repo ${filter.repo}` : null,
+      filter.level ? `level ${filter.level}` : null,
+    ].filter(Boolean);
+    console.error(`[verifyflow] scope: ${f.join(", ")} — ${events.length}/${all.length} event(s).`);
+  }
+  let out = renderMetricsMarkdown(metrics);
+  if (wantTrend) out += "\n" + renderTrendMarkdown(computeTrend(events));
+  console.log(out);
   return 0;
 }
 
@@ -352,6 +497,138 @@ async function cmdDoctor(): Promise<number> {
   const report = await runDoctor();
   console.log(renderDoctorReport(report));
   return report.ok ? 0 : 1;
+}
+
+/** `vf memory ls|show <key>|clear [--repo ...] [--yes]` (IN-625): inspect/prune reusable memory. */
+async function cmdMemory(args: Args, positionals: string[]): Promise<number> {
+  const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
+  const store = new MemoryStore(outputRoot);
+  const sub = positionals[0] ?? "ls";
+
+  if (sub === "ls") {
+    const res = await memoryLs(store);
+    console.log(args.json ? JSON.stringify(res.json, null, 2) : res.text);
+    return 0;
+  }
+  if (sub === "show") {
+    const key = positionals[1];
+    if (!key) {
+      console.error("error: vf memory show <key> needs a test point id (list them with `vf memory ls`).");
+      return 2;
+    }
+    const res = await memoryShow(store, key);
+    if (!res.found) {
+      console.error(res.text);
+      return 1;
+    }
+    console.log(args.json ? JSON.stringify(res.point, null, 2) : res.text);
+    return 0;
+  }
+  if (sub === "clear") {
+    const repo = str(args.repo);
+    if (!args.yes) {
+      const scope = repo ? `memory for ${repo}` : "ALL reusable test-point memory";
+      const ok = await confirm(`This will delete ${scope} under ${outputRoot}. Continue? [y/N] `);
+      if (!ok) {
+        console.error("aborted.");
+        return 1;
+      }
+    }
+    const res = await memoryClear(store, repo);
+    console.log(res.text);
+    return 0;
+  }
+
+  console.error(`error: unknown memory subcommand "${sub}" (expected ls | show | clear).`);
+  return 2;
+}
+
+/** Prompt for a yes/no confirmation on stdin. Returns false on EOF / non-tty. */
+async function confirm(question: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = await rl.question(question);
+    return /^y(es)?$/i.test(answer.trim());
+  } catch {
+    return false;
+  } finally {
+    rl.close();
+  }
+}
+
+/** `vf replay <runId>` (IN-625): re-run the verdict engine on a past run's stored evidence. */
+async function cmdReplay(args: Args, positionals: string[]): Promise<number> {
+  const runId = positionals[0];
+  if (!runId) {
+    console.error("error: vf replay <runId> needs a run id (see `.verifyflow/runs/`).");
+    return 2;
+  }
+  const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
+  const runDir = path.join(outputRoot, "runs", runId);
+  let inputs;
+  try {
+    inputs = await readVerdictInputs(runDir);
+  } catch {
+    console.error(
+      `error: no stored evidence for run "${runId}" (expected ${path.join(runDir, "verdict-inputs.json")}). ` +
+        "Only runs recorded after this feature shipped can be replayed.",
+    );
+    return 2;
+  }
+  const llm = await buildLlm(args);
+  const verdict = await replayVerdict(inputs, llm);
+
+  if (args.json) {
+    console.log(JSON.stringify(verdict, null, 2));
+    return 0;
+  }
+  const lines: string[] = [];
+  lines.push(`# Replay — ${runId}`);
+  lines.push(`> Re-ran the verdict engine on stored evidence (no probes executed).`);
+  lines.push("");
+  lines.push(`Run verdict: **${verdict.runVerdict}**`);
+  lines.push(`Summary: ${verdict.summary}`);
+  lines.push("");
+  lines.push("## Criteria");
+  for (const c of verdict.criterionResults) {
+    lines.push(`- ${c.criterionId} → ${c.result} (confidence ${c.confidence.toFixed(2)}): ${c.reason}`);
+  }
+  console.log(lines.join("\n"));
+  return 0;
+}
+
+/** `vf show <runId>` (IN-625): re-render a past run's report.md (or report.json with --json). */
+async function cmdShow(args: Args, positionals: string[]): Promise<number> {
+  const runId = positionals[0];
+  if (!runId) {
+    console.error("error: vf show <runId> needs a run id (see `.verifyflow/runs/`).");
+    return 2;
+  }
+  const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
+  const res = await showRun(outputRoot, runId, !!args.json);
+  if (!res.found) {
+    console.error(res.text);
+    return 1;
+  }
+  console.log(res.text);
+  return 0;
+}
+
+/** `vf signal <runId>` (IN-625): pretty-print a past run's improvement-signal.json. */
+async function cmdSignal(args: Args, positionals: string[]): Promise<number> {
+  const runId = positionals[0];
+  if (!runId) {
+    console.error("error: vf signal <runId> needs a run id (see `.verifyflow/runs/`).");
+    return 2;
+  }
+  const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
+  const res = await showSignal(outputRoot, runId, !!args.json);
+  if (!res.found) {
+    console.error(res.text);
+    return 1;
+  }
+  console.log(res.text);
+  return 0;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -420,7 +697,7 @@ async function cmdWatch(args: Args): Promise<number> {
 }
 
 async function main(): Promise<number> {
-  const { cmd, args } = parseArgs(process.argv.slice(2));
+  const { cmd, args, positionals } = parseArgs(process.argv.slice(2));
   // `help`, `--help`/`-h` as the first token, or any `--help`/`-h` flag → usage (exit 0).
   // An empty invocation still prints usage but exits 2 (nothing to do).
   if (args.help || cmd === "" || cmd === "help" || cmd === "--help" || cmd === "-h") {
@@ -430,6 +707,10 @@ async function main(): Promise<number> {
   if (cmd === "run") return cmdRun(args);
   if (cmd === "step") return cmdStep(args);
   if (cmd === "report") return cmdReport(args);
+  if (cmd === "memory") return cmdMemory(args, positionals);
+  if (cmd === "replay") return cmdReplay(args, positionals);
+  if (cmd === "show") return cmdShow(args, positionals);
+  if (cmd === "signal") return cmdSignal(args, positionals);
   if (cmd === "init") return cmdInit(args);
   if (cmd === "doctor") return cmdDoctor();
   if (cmd === "watch") return cmdWatch(args);

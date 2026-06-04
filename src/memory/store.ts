@@ -44,7 +44,7 @@ export interface TestPointMatch {
   exact: boolean;
 }
 
-interface FailureModeRecord {
+export interface FailureModeRecord {
   category: FailureCategory;
   component: string;
   count: number;
@@ -149,6 +149,93 @@ export class MemoryStore {
       });
     }
     await fs.writeFile(file, JSON.stringify(points, null, 2) + "\n");
+  }
+
+  async loadFailureModes(repo: string): Promise<FailureModeRecord[]> {
+    try {
+      const raw = await fs.readFile(path.join(this.dir(repo), "failuremodes.json"), "utf8");
+      return JSON.parse(raw) as FailureModeRecord[];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * List the repos that have a memory directory on disk (IN-625, `vf memory ls`). The on-disk
+   * name is a slug of the repo, but every stored TestPoint carries its original `repo` string —
+   * we read that back so callers see `owner/name`, not the slug.
+   */
+  async listRepos(): Promise<Array<{ slug: string; repo: string; testPoints: number; failureModes: number }>> {
+    const memDir = path.join(this.root, "memory");
+    let entries: string[];
+    try {
+      entries = (await fs.readdir(memDir, { withFileTypes: true }))
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    } catch {
+      return [];
+    }
+    const out: Array<{ slug: string; repo: string; testPoints: number; failureModes: number }> = [];
+    for (const slugName of entries.sort()) {
+      const points = await this.loadTestPointsBySlug(slugName);
+      const failureModes = await this.loadFailureModesBySlug(slugName);
+      out.push({
+        slug: slugName,
+        repo: points[0]?.repo ?? slugName,
+        testPoints: points.length,
+        failureModes: failureModes.length,
+      });
+    }
+    return out;
+  }
+
+  private async loadTestPointsBySlug(slugName: string): Promise<TestPoint[]> {
+    try {
+      const raw = await fs.readFile(path.join(this.root, "memory", slugName, "testpoints.json"), "utf8");
+      return JSON.parse(raw) as TestPoint[];
+    } catch {
+      return [];
+    }
+  }
+
+  private async loadFailureModesBySlug(slugName: string): Promise<FailureModeRecord[]> {
+    try {
+      const raw = await fs.readFile(path.join(this.root, "memory", slugName, "failuremodes.json"), "utf8");
+      return JSON.parse(raw) as FailureModeRecord[];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Find a single stored test point by its id, across all repos (IN-625, `vf memory show <key>`). */
+  async findTestPoint(id: string): Promise<TestPoint | undefined> {
+    for (const r of await this.listRepos()) {
+      const points = await this.loadTestPointsBySlug(r.slug);
+      const hit = points.find((p) => p.id === id);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+
+  /**
+   * Clear the on-disk memory (IN-625, `vf memory clear`). With `repo`, only that repo's memory
+   * directory is removed; without it, the whole memory tree is wiped. Returns the repo slugs that
+   * were removed (empty when there was nothing to clear).
+   */
+  async clear(repo?: string): Promise<string[]> {
+    if (repo) {
+      const dir = this.dir(repo);
+      const existed = await fs
+        .stat(dir)
+        .then(() => true)
+        .catch(() => false);
+      if (!existed) return [];
+      await fs.rm(dir, { recursive: true, force: true });
+      return [slug(repo)];
+    }
+    const repos = (await this.listRepos()).map((r) => r.slug);
+    await fs.rm(path.join(this.root, "memory"), { recursive: true, force: true });
+    return repos;
   }
 
   async recordFailureMode(

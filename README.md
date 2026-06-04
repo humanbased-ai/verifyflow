@@ -119,6 +119,7 @@ vf run --linear <KEY|url> --pr <url|owner/repo#N|#N> --level <functional|ui> [op
 | `--allow-no-ticket` | Degraded mode: verify against the PR's own description; verdict capped at `manual_review_required`. |
 | `--out <dir>` | Output root for reports/artifacts/memory (default `./.verifyflow`). |
 | `--model <m>` | Model for the `claude` backend. |
+| `--dry-run` | Resolve criteria + build the plan and print it, **without executing** anything (no checkout). Cost-free "how would it verify this?" inspection; exits `0`. |
 
 Exit code is `0` unless a gating policy blocks the merge (then `1`).
 
@@ -135,12 +136,50 @@ stdout for the orchestrator. Exits `0` whenever verification completed (never ga
 ### `vf report` — quality-intelligence metrics
 
 ```
-vf report [--out <dir>] [--json]
+vf report [--out <dir>] [--json] [--since <date>] [--repo <owner/repo>] [--level <l>] [--trend]
 ```
 
 Aggregates accumulated run events (`<out>/events.jsonl`) into metrics: acceptance-criterion pass
 rate, not-evaluable rate, failure rate by component/level, probe reuse rate, and recurring
-failure patterns.
+failure patterns. `--since` / `--repo` / `--level` scope the metrics to a subset of events;
+`--trend` appends a per-day run-verdict trend.
+
+### `vf memory` — inspect / prune the reusable test-point memory
+
+```
+vf memory ls                            # repos with stored test points + counts
+vf memory show <key>                    # dump a single test point by id
+vf memory clear [--repo <o/r>] [--yes]  # prune one repo's memory, or all (confirms unless --yes)
+```
+
+The memory is the "gets smarter as it runs" moat — probes captured on one run are reused on the
+next. These subcommands view and prune the on-disk store under `<out>/memory/`.
+
+### `vf replay <runId>` — re-run the verdict engine on stored evidence
+
+```
+vf replay <runId> [--out <dir>] [--json]
+```
+
+Re-derives a verdict from a past run's saved evidence (`<runId>/verdict-inputs.json`) **without
+re-executing any probe or test** — cheap, repeatable iteration on verdict/judging logic.
+
+### `vf show <runId>` / `vf signal <runId>` — review a past run
+
+```
+vf show   <runId> [--out <dir>] [--json]   # re-render the stored report.md / report.json
+vf signal <runId> [--out <dir>] [--json]   # pretty-print improvement-signal.json
+```
+
+### `vf doctor` — environment readiness
+
+```
+vf doctor
+```
+
+Reports whether `gh`, `claude`, `uv`, and `LINEAR_API_KEY` are present, plus a Docker/Podman line
+(sandbox isolation for executing PR code) and a Playwright line (`--level ui` browser checks).
+Missing **required** tools exit non-zero; optional ones only warn.
 
 ---
 
