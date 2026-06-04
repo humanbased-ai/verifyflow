@@ -346,7 +346,9 @@ async function cmdDoctor(): Promise<number> {
 
 async function main(): Promise<number> {
   const { cmd, args } = parseArgs(process.argv.slice(2));
-  if (args.help || cmd === "" || cmd === "help") {
+  // `help`, `--help`/`-h` as the first token, or any `--help`/`-h` flag → usage (exit 0).
+  // An empty invocation still prints usage but exits 2 (nothing to do).
+  if (args.help || cmd === "" || cmd === "help" || cmd === "--help" || cmd === "-h") {
     console.log(USAGE);
     return cmd === "" ? 2 : 0;
   }
