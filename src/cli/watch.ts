@@ -72,6 +72,10 @@ export async function watchTick(
   seen: Map<number, string>,
 ): Promise<WatchAction[]> {
   const prs = await deps.listOpenPrs(repo);
+  // Prune dedup entries for PRs that are no longer open (merged/closed) so `seen` can't grow
+  // unbounded on a long-running daemon.
+  const open = new Set(prs.map((p) => p.number));
+  for (const n of [...seen.keys()]) if (!open.has(n)) seen.delete(n);
   const acted: WatchAction[] = [];
   for (const pr of prs) {
     if (seen.get(pr.number) === pr.headSha) continue; // this head already verified
@@ -120,12 +124,26 @@ export async function ghListOpenPrs(repo: string): Promise<PrSummary[]> {
   return raw.map((p) => ({ number: p.number, headSha: p.headRefOid }));
 }
 
-/** List a PR's issue-thread comments via `gh api`. */
+/**
+ * List a PR's issue-thread comments via `gh api`. Uses `--jq '.[]'` so paginated results come
+ * back as one JSON object per line (NDJSON) — plain `--paginate` concatenates a separate JSON
+ * array per page, which `JSON.parse` cannot read once a PR has 30+ comments.
+ */
 export async function ghListIssueComments(repo: string, pr: number): Promise<IssueComment[]> {
-  const res = await run("gh", ["api", `repos/${repo}/issues/${pr}/comments`, "--paginate"]);
+  const res = await run("gh", ["api", `repos/${repo}/issues/${pr}/comments`, "--paginate", "--jq", ".[]"]);
   if (!res.executed || res.code !== 0) throw new Error(res.spawnError ?? `gh api comments failed: ${res.stderr.slice(0, 200)}`);
-  const raw = JSON.parse(res.stdout || "[]") as { body?: string }[];
-  return raw.map((c) => ({ body: c.body ?? "" }));
+  return res.stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        const o = JSON.parse(line) as { body?: string };
+        return { body: o.body ?? "" };
+      } catch {
+        return { body: "" };
+      }
+    });
 }
 
 /** Squash-merge a PR via `gh`, pinned to the head sha so a raced push can't be merged blindly. */

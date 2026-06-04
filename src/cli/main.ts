@@ -395,10 +395,12 @@ async function cmdWatch(args: Args): Promise<number> {
     `[verifyflow] vf watch on ${repo} — every ${intervalMs / 1000}s, auto-merge: ${autoMerge} (Ctrl-C to stop).`,
   );
   let stop = false;
-  process.once("SIGINT", () => {
+  const onStop = () => {
     stop = true;
     console.error("\n[verifyflow] stopping watch after the current tick…");
-  });
+  };
+  process.once("SIGINT", onStop);
+  process.once("SIGTERM", onStop); // containers / systemd / kill use SIGTERM
   while (!stop) {
     try {
       const acted = await watchTick(repo, deps, seen);

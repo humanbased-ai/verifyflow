@@ -110,6 +110,14 @@ test("a single PR's verify error is recorded and does not abort the tick", async
   assert.equal(acted.find((a) => a.pr === 2)!.merged, true);
 });
 
+test("seen entries for PRs no longer open are pruned (no unbounded growth)", async () => {
+  const seen = new Map<number, string>([[7, "aaa"], [8, "bbb"]]); // 7 & 8 verified earlier
+  const d = deps({ listOpenPrs: async () => [{ number: 8, headSha: "bbb" }] }); // only 8 still open
+  await watchTick("o/r", d, seen);
+  assert.equal(seen.has(7), false, "closed PR 7 pruned from seen");
+  assert.equal(seen.has(8), true, "still-open PR 8 retained");
+});
+
 test("a thrown verify is not deduped — it retries on the next tick (review fix)", async () => {
   let attempts = 0;
   const seen = new Map<number, string>();
