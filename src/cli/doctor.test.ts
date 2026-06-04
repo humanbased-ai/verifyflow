@@ -35,6 +35,6 @@ test("render marks required misses FAIL and optional misses warn", async () => {
   const report = await runDoctor({ env: {}, hasBin: nonePresent });
   const text = renderDoctorReport(report);
   assert.match(text, /\[FAIL\] gh/);
-  assert.match(text, /\[warn\] claude/);
+  assert.match(text, /\[WARN\] claude/);
   assert.match(text, /missing required tools/);
 });
