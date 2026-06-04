@@ -10,6 +10,11 @@ import type { LlmClient } from "../backends/llm.js";
 import { MemoryStore } from "../memory/store.js";
 import { EventLog } from "../memory/eventLog.js";
 import { ensurePrCheckout } from "../harness/checkout.js";
+import { loadRepoConfig } from "../core/planner/repoConfig.js";
+import { resolveAppSource, ghDeploymentLookup } from "../harness/ui/appSource.js";
+import { PlaywrightBrowserDriver } from "../harness/ui/browserDriver.js";
+import { AgenticUiHarness } from "../harness/ui/agenticUiHarness.js";
+import type { UiHarness } from "../harness/ui/uiHarness.js";
 import { renderMarkdown, postPrComment } from "../core/reporting/reporter.js";
 import { computeMetrics, renderMetricsMarkdown } from "../core/reporting/metrics.js";
 import { buildStepSummary } from "./step.js";
@@ -32,8 +37,11 @@ Options:
   --linear <KEY|url>     Linear issue (PRIMARY source of acceptance criteria).
                          If omitted, VerifyFlow derives it from the PR body's Linear link.
   --pr <ref>             GitHub PR URL, owner/repo#N, or #N.
-  --level <level>        functional | ui (browser-driven). journey not yet implemented.
-  --base-url <url>       Base URL of the running app for ui-level browser checks.
+  --level <level>        functional | ui (AI-driven browser). journey not yet implemented.
+  --base-url <url>       Base URL of the running app for ui-level browser checks. If omitted,
+                         VerifyFlow tries to discover a deployment preview from the PR's checks.
+  --ui-auth <file>       Playwright storageState JSON (cookies/localStorage) for an authenticated
+                         ui session. Create with: playwright codegen --save-storage=auth.json
   --policy <p>           advisory (default, never blocks) | merge_gate (blocks on needs_fix)
                          | strict (also blocks on manual_review_required / accept_with_risks).
   --backend <name>       Label recorded in the report (default: the LLM backend name).
@@ -160,6 +168,43 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     co.logs.forEach((l) => console.error("  " + l));
   }
 
+  // For ui level: resolve a live app URL (explicit → preview → local) and build the AI-driven
+  // browser harness. The browser is an optional dependency; without it we leave the harness
+  // undefined so the pipeline blocks the criteria rather than false-passing them (IN-606).
+  let resolvedBaseUrl = str(args["base-url"]);
+  let uiHarnessFactory: ((artifactRoot: string) => UiHarness) | undefined;
+  let appCleanup: (() => Promise<void>) | undefined;
+  if (level === "ui" && !fixtures) {
+    const prCtx = await github.loadPr(parsePrRef(pr));
+    const repoConfig = await loadRepoConfig(workdir ? path.resolve(workdir) : undefined);
+    const source = await resolveAppSource({
+      explicitBaseUrl: str(args["base-url"]),
+      pr: prCtx,
+      repoConfig,
+      workdir: workdir ? path.resolve(workdir) : undefined,
+      deps: { lookupDeployments: ghDeploymentLookup() },
+    });
+    if (source.kind === "ready") {
+      resolvedBaseUrl = source.baseUrl;
+      appCleanup = source.cleanup;
+      console.error(`[verifyflow] ui app source: ${source.source} → ${source.baseUrl}`);
+    } else {
+      console.error(`[verifyflow] ui: ${source.reason} — criteria will be environment-blocked.`);
+    }
+
+    const driver = new PlaywrightBrowserDriver();
+    if (await driver.available()) {
+      const auth = str(args["ui-auth"]);
+      uiHarnessFactory = (artifactRoot) =>
+        new AgenticUiHarness({ driver, llm, artifactsDir: artifactRoot, storageStatePath: auth });
+    } else {
+      console.error(
+        "[verifyflow] ui: Playwright not installed — install with " +
+          "`npm i -D playwright && npx playwright install chromium`. Criteria will be blocked.",
+      );
+    }
+  }
+
   const request: RunRequest = {
     linearIssue: str(args.linear) ?? "",
     pullRequest: pr,
@@ -168,7 +213,7 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     backend: str(args.backend),
     outputRoot,
     workdir: workdir ? path.resolve(workdir) : undefined,
-    baseUrl: str(args["base-url"]),
+    baseUrl: resolvedBaseUrl,
     sandbox: !args["no-sandbox"],
     crosscheckVerdict: str(args["crosscheck-verdict"]),
     allowNoTicket: !!args["allow-no-ticket"],
@@ -180,6 +225,7 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     llm,
     memory: new MemoryStore(outputRoot),
     eventLog: new EventLog(outputRoot),
+    uiHarnessFactory,
   };
 
   if (!request.workdir) {
@@ -188,7 +234,13 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     );
   }
 
-  const { report, runDir, reportPaths, signalPath } = await runVerification(request, deps);
+  let runResult;
+  try {
+    runResult = await runVerification(request, deps);
+  } finally {
+    if (appCleanup) await appCleanup();
+  }
+  const { report, runDir, reportPaths, signalPath } = runResult;
 
   console.error(`\n[verifyflow] reports: ${reportPaths.markdownPath} | ${reportPaths.jsonPath}`);
   if (signalPath) {

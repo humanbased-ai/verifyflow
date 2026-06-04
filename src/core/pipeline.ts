@@ -37,6 +37,12 @@ export interface PipelineDeps {
   clock?: () => string;
   /** UI execution backend for level=ui (IN-559). Defaults to UnavailableUiHarness. */
   uiHarness?: UiHarness;
+  /**
+   * Builds the UI harness once the run's artifact dir is known, so browser evidence
+   * (screenshots) lands under the same artifact root as command evidence (IN-606). Takes
+   * precedence over `uiHarness` when provided.
+   */
+  uiHarnessFactory?: (artifactRoot: string) => UiHarness;
 }
 
 export interface PipelineOutput {
@@ -97,7 +103,7 @@ export async function runVerification(
   if (req.level === "ui") {
     // UI level: browser-driven checks (IN-559). The browser is an execution backend behind the
     // UiHarness seam; until a real driver is wired the default reports checks as not executed.
-    const ui = deps.uiHarness ?? new UnavailableUiHarness();
+    const ui = deps.uiHarnessFactory?.(artifactRoot) ?? deps.uiHarness ?? new UnavailableUiHarness();
     // UI checks are judged by the browser (pass/fail), not by stdout. Replace any command-probe
     // a criterion picked up with a clean ui marker so the engine scores exit 0 = pass / 1 = fail
     // and never compares against a stdout substring meant for a CLI probe.
