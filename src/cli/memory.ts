@@ -15,11 +15,15 @@ import type { TestPoint } from "../types.js";
 /**
  * Validate a `--repo` argument before it reaches `store.clear → slug() → fs.rm(recursive)`.
  * Only `owner/repo` shapes (the chars `slug()` preserves, plus a single separating slash) are
- * accepted, so a crafted value such as `..` can never construct a path outside the memory tree
+ * accepted. The regex char class allows `.`, so a single segment of `.`/`..` would otherwise pass
+ * (e.g. `../foo`); we reject those segments explicitly so a crafted value can never be mistaken for
+ * a real repo and the user gets an argument error rather than a misleading "nothing stored" message
  * (IN-625 review).
  */
 export function isValidRepoArg(repo: string): boolean {
-  return /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repo);
+  if (!/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repo)) return false;
+  const [owner, name] = repo.split("/");
+  return owner !== "." && owner !== ".." && name !== "." && name !== "..";
 }
 
 export interface MemoryLsResult {

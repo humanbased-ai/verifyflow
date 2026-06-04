@@ -17,13 +17,14 @@ export function runDirFor(outputRoot: string, runId: string): string {
  * A run id names a single directory under `<out>/runs/`, never a path — reject anything that would
  * escape that directory before we `path.join` it, or an attacker-supplied argument
  * (`vf replay/show/signal <runId>`) could traverse out of the output root and read arbitrary files
- * (IN-625 review). `runId !== path.basename(runId)` catches any embedded separator (`a/b`, `../x`,
- * an absolute path) and rejects a null byte. We additionally special-case bare `"."`/`".."`: those
- * *are* their own basename, so the first check passes them through, yet they still resolve to the
- * runs dir / its parent — so they need their own rejection.
+ * (IN-625 review). A safe run id is non-empty, not bare `.`/`..` (those *are* their own basename so
+ * the basename check passes them, yet they resolve to the runs dir / its parent), unchanged by
+ * `basename` (catches any embedded separator: `a/b`, `../x`, an absolute path), and free of null
+ * bytes. The empty string is unsafe too — its own basename is `""`, so it must be rejected up front.
  */
 export function isUnsafeRunId(runId: string): boolean {
-  return runId !== path.basename(runId) || runId === "." || runId === ".." || runId.includes("\0");
+  if (!runId || runId === "." || runId === "..") return true;
+  return runId !== path.basename(runId) || runId.includes("\0");
 }
 
 async function readFileOrUndefined(p: string): Promise<string | undefined> {

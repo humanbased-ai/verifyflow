@@ -131,3 +131,17 @@ test("renderSignal includes all items", () => {
   assert.match(text, /AC-2/);
   assert.match(text, /2 actionable item/);
 });
+
+test("isUnsafeRunId rejects traversal, separators, and empty; accepts a plain run id", () => {
+  // Traversal / escape attempts.
+  assert.equal(isUnsafeRunId("../foo"), true);
+  assert.equal(isUnsafeRunId("../../etc/passwd"), true);
+  assert.equal(isUnsafeRunId(".."), true);
+  assert.equal(isUnsafeRunId("."), true);
+  assert.equal(isUnsafeRunId("a/b"), true);
+  assert.equal(isUnsafeRunId("foo/"), true);
+  // Empty string violates the single-segment contract even though the CLI guards `!runId` first.
+  assert.equal(isUnsafeRunId(""), true);
+  // A real run id is a single safe segment.
+  assert.equal(isUnsafeRunId("EX-1_pr7_20260603000000"), false);
+});

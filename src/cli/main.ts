@@ -575,6 +575,9 @@ async function cmdMemory(args: Args, positionals: string[]): Promise<number> {
 
 /** Prompt for a yes/no confirmation on stdin. Returns false on EOF / non-tty. */
 async function confirm(question: string): Promise<boolean> {
+  // No interactive terminal (CI, piped stdin): don't block on `.question()` waiting for input that
+  // will never come — decline so callers must pass --yes for a non-interactive clear.
+  if (!process.stdin.isTTY) return false;
   // Prompt goes to stderr (not stdout) on purpose: stdout stays reserved for the command's real
   // output (e.g. piping `vf memory ...`), so the interactive prompt never pollutes it.
   const rl = createInterface({ input: process.stdin, output: process.stderr });

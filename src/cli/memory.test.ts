@@ -101,3 +101,17 @@ test("memory clear on an empty/absent repo reports nothing to clear", async () =
   assert.deepEqual(res.cleared, []);
   assert.match(res.text, /nothing stored/);
 });
+
+test("isValidRepoArg accepts owner/name and rejects malformed or traversal segments", () => {
+  assert.equal(isValidRepoArg("acme/app"), true);
+  assert.equal(isValidRepoArg("a.b_c-d/e.f_g-h"), true);
+  // Missing or extra segments.
+  assert.equal(isValidRepoArg("acme"), false);
+  assert.equal(isValidRepoArg("acme/app/extra"), false);
+  assert.equal(isValidRepoArg(""), false);
+  // Dot/dot-dot segments must be rejected even though the regex char class allows `.`.
+  assert.equal(isValidRepoArg("../foo"), false);
+  assert.equal(isValidRepoArg("foo/.."), false);
+  assert.equal(isValidRepoArg("./foo"), false);
+  assert.equal(isValidRepoArg("../.."), false);
+});
