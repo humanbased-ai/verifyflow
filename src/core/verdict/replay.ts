@@ -30,9 +30,21 @@ export async function writeVerdictInputs(
   return p;
 }
 
+/** The schema version this build knows how to replay. */
+export const VERDICT_INPUTS_SCHEMA_VERSION = 1;
+
 export async function readVerdictInputs(runDir: string): Promise<VerdictInputs> {
   const raw = await fs.readFile(path.join(runDir, VERDICT_INPUTS_FILENAME), "utf8");
-  return JSON.parse(raw) as VerdictInputs;
+  const parsed = JSON.parse(raw) as VerdictInputs;
+  // Guard against replaying evidence written by an incompatible (e.g. future) version, which
+  // would otherwise feed mismatched data into the engine silently (IN-625 review).
+  if (parsed.schemaVersion !== VERDICT_INPUTS_SCHEMA_VERSION) {
+    throw new Error(
+      `${VERDICT_INPUTS_FILENAME} schemaVersion ${parsed.schemaVersion} is not supported by this ` +
+        `build (expected ${VERDICT_INPUTS_SCHEMA_VERSION}) — recorded by an incompatible version.`,
+    );
+  }
+  return parsed;
 }
 
 /** Re-run the verdict engine against stored evidence. No probes are executed. */

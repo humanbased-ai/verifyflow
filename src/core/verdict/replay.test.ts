@@ -77,3 +77,11 @@ test("write/read verdict inputs round-trips through disk and replays identically
   const verdict = await replayVerdict(loaded, new FallbackLlm());
   assert.equal(verdict.runVerdict, "accept");
 });
+
+test("readVerdictInputs rejects an unsupported schemaVersion (review)", async () => {
+  const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "vf-replay-ver-"));
+  // Simulate evidence written by a future, incompatible version.
+  const payload = { schemaVersion: 2, ...inputsFor(0) };
+  await fs.writeFile(path.join(runDir, VERDICT_INPUTS_FILENAME), JSON.stringify(payload, null, 2));
+  await assert.rejects(readVerdictInputs(runDir), /schemaVersion 2 is not supported/);
+});

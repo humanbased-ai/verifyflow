@@ -136,6 +136,7 @@ async function buildEvaluationPlan(
 }
 
 export interface PlanPreview {
+  pr: PrContext;
   issue: IssueContext;
   criteria: CriteriaModel;
   plan: EvaluationPlan;
@@ -148,12 +149,11 @@ export interface PlanPreview {
  * VerifyFlow verify this?" for free before paying for a real run.
  */
 export async function planRun(req: RunRequest, deps: PipelineDeps): Promise<PlanPreview> {
-  const { issue, degraded } = await resolveContext(req, deps);
-  const pr = await deps.github.loadPr(parsePrRef(req.pullRequest));
+  const { pr, issue, degraded } = await resolveContext(req, deps);
   const criteria = await parseCriteria(issue, pr, deps.llm);
   // No run dir in dry-run; the artifact root is only consulted by an executing ui harness.
   const { plan } = await buildEvaluationPlan(req, deps, criteria, pr, "(dry-run)");
-  return { issue, criteria, plan, degraded };
+  return { pr, issue, criteria, plan, degraded };
 }
 
 export async function runVerification(

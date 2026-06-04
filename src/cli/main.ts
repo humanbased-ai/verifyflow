@@ -449,6 +449,13 @@ async function cmdReport(args: Args): Promise<number> {
   }
   // Scope filters (IN-625): narrow the event log before computing metrics.
   const filter = { since: str(args.since), repo: str(args.repo), level: str(args.level) };
+  // An unparsable --since is ignored by filterEvents (treated as no lower bound). Surface that
+  // on stderr — in both text and JSON modes — so a typo'd date isn't silently dropped (review).
+  if (filter.since && Number.isNaN(Date.parse(filter.since))) {
+    console.error(
+      `[verifyflow] warning: could not parse --since "${filter.since}" — ignoring the date filter.`,
+    );
+  }
   const events = filterEvents(all, filter);
   const scoped = Object.values(filter).some(Boolean);
   if (events.length === 0) {
@@ -530,8 +537,9 @@ async function cmdMemory(args: Args, positionals: string[]): Promise<number> {
       const scope = repo ? `memory for ${repo}` : "ALL reusable test-point memory";
       const ok = await confirm(`This will delete ${scope} under ${outputRoot}. Continue? [y/N] `);
       if (!ok) {
+        // A user-cancelled prune is not an error — exit 0 so wrapping automation doesn't trip.
         console.error("aborted.");
-        return 1;
+        return 0;
       }
     }
     const res = await memoryClear(store, repo);

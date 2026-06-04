@@ -71,6 +71,8 @@ test("memory clear --repo removes only that repo", async () => {
   const { store } = await seeded();
   const res = await memoryClear(store, "acme/app");
   assert.equal(res.cleared.length, 1);
+  // Message reports how many test points were removed, scoped to the repo (review).
+  assert.match(res.text, /cleared 1 test point\(s\) for acme\/app/);
   assert.equal((await store.loadTestPoints("acme/app")).length, 0);
   assert.equal((await store.loadTestPoints("other/repo")).length, 1, "other repo untouched");
 });
@@ -79,6 +81,8 @@ test("memory clear (no repo) wipes everything", async () => {
   const { store } = await seeded();
   const res = await memoryClear(store);
   assert.ok(res.cleared.length >= 2);
+  // Reports total test points across all wiped repos (review).
+  assert.match(res.text, /cleared 2 test point\(s\) across 2 repo\(s\)/);
   assert.deepEqual(await store.listRepos(), []);
 });
 

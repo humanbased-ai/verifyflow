@@ -76,10 +76,16 @@ export interface MemoryClearResult {
  * this performs the deletion and reports what was removed.
  */
 export async function memoryClear(store: MemoryStore, repo?: string): Promise<MemoryClearResult> {
+  // Snapshot the test-point counts before deletion so the success line can report how much was
+  // actually removed ("N test point(s) across M repo(s)"), not just that something was cleared.
+  const before = await store.listRepos();
   const cleared = await store.clear(repo);
   if (cleared.length === 0) {
     return { cleared, text: repo ? `memory: nothing stored for ${repo}.` : "memory: nothing to clear." };
   }
-  const scope = repo ? `memory for ${repo}` : `all memory (${cleared.length} repo(s))`;
-  return { cleared, text: `memory: cleared ${scope}.` };
+  const clearedSet = new Set(cleared);
+  const points = before.filter((r) => clearedSet.has(r.slug)).reduce((n, r) => n + r.testPoints, 0);
+  const repoCount = cleared.length;
+  const scope = repo ? `for ${repo}` : `across ${repoCount} repo(s)`;
+  return { cleared, text: `memory: cleared ${points} test point(s) ${scope}.` };
 }
