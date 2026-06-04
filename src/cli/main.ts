@@ -378,6 +378,8 @@ async function cmdDryRun(args: Args): Promise<number> {
     console.error(USAGE);
     return 2;
   }
+  // Mirror executeRun's guard: `journey` is a valid Level in the type system but is not yet
+  // implemented in either the real run or this preview, so reject it the same way here.
   if (level !== "functional" && level !== "ui") {
     console.error(`error: level "${level}" is not implemented yet (functional, ui).`);
     return 2;
@@ -403,7 +405,16 @@ async function cmdDryRun(args: Args): Promise<number> {
     memory: new MemoryStore(outputRoot),
     eventLog: new EventLog(outputRoot),
   };
-  const preview = await planRun(request, deps);
+  // `--linear` is implicitly required unless `--allow-no-ticket`: resolveContext (shared with the
+  // real run) falls back to the key embedded in the PR, then throws a clear message if it finds
+  // none. Surface that as a clean error here rather than letting it bubble up as a stack trace.
+  let preview: PlanPreview;
+  try {
+    preview = await planRun(request, deps);
+  } catch (err) {
+    console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+    return 2;
+  }
   console.log(renderPlanPreview(preview));
   return 0;
 }
@@ -646,6 +657,11 @@ async function cmdSignal(args: Args, positionals: string[]): Promise<number> {
   }
   const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
   const res = await showSignal(outputRoot, runId, !!args.json);
+  if (res.corrupt) {
+    // The run exists but its signal file is unreadable — a distinct failure from "no such run".
+    console.error(res.text);
+    return 1;
+  }
   if (!res.found) {
     console.error(res.text);
     return 1;

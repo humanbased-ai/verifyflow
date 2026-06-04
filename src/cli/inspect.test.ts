@@ -86,11 +86,32 @@ test("signal on a clean run (no signal file) is not found with a clear message",
 
 test("IN-625 review: isUnsafeRunId rejects path-traversal run ids", () => {
   // Legitimate run ids pass.
-  assert.equal(isUnsafeRunId("EX-1_pr7_20260603000000"), false);
-  // Anything that isn't a bare directory name is rejected.
-  for (const bad of ["../../etc/passwd", "..", "a/b", "/abs/path", "x\0y", "sub/run"]) {
+  for (const ok of ["EX-1_pr7_20260603000000", "run-123", "abc.def"]) {
+    assert.equal(isUnsafeRunId(ok), false, `expected ${JSON.stringify(ok)} to be safe`);
+  }
+  // Anything that isn't a bare directory name is rejected — including bare "." / "..".
+  for (const bad of ["../../etc/passwd", "..", ".", "a/b", "/abs/path", "x\0y", "sub/run", "foo/../bar"]) {
     assert.equal(isUnsafeRunId(bad), true, `expected ${JSON.stringify(bad)} to be rejected`);
   }
+});
+
+test("signal on a corrupt file is found-but-corrupt, not missing", async () => {
+  const { outputRoot, runId } = await makeRun();
+  await fs.writeFile(path.join(runDirFor(outputRoot, runId), "improvement-signal.json"), "{ not valid json");
+  const res = await showSignal(outputRoot, runId, false);
+  assert.equal(res.found, true, "the file exists, so it is not 'not found'");
+  assert.equal(res.corrupt, true);
+  assert.match(res.text, /exists but is not valid JSON/);
+});
+
+test("show / signal reject an unsafe run id without touching disk", async () => {
+  const { outputRoot } = await makeRun();
+  const show = await showRun(outputRoot, "../../etc/passwd", false);
+  assert.equal(show.found, false);
+  assert.match(show.text, /not a valid run id/);
+  const sig = await showSignal(outputRoot, "..", false);
+  assert.equal(sig.found, false);
+  assert.match(sig.text, /not a valid run id/);
 });
 
 test("renderSignal includes all items", () => {

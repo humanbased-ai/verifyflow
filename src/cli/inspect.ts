@@ -14,12 +14,16 @@ export function runDirFor(outputRoot: string, runId: string): string {
 }
 
 /**
- * A run id names a single directory under `<out>/runs/` — it must not contain path separators or
- * `..`, or an attacker-supplied argument (`vf replay/show/signal <runId>`) could traverse out of
- * the output root and read arbitrary files (IN-625 review). Returns true if the id is unsafe.
+ * A run id names a single directory under `<out>/runs/`, never a path — reject anything that would
+ * escape that directory before we `path.join` it, or an attacker-supplied argument
+ * (`vf replay/show/signal <runId>`) could traverse out of the output root and read arbitrary files
+ * (IN-625 review). `runId !== path.basename(runId)` catches any embedded separator (`a/b`, `../x`,
+ * an absolute path) and rejects a null byte. We additionally special-case bare `"."`/`".."`: those
+ * *are* their own basename, so the first check passes them through, yet they still resolve to the
+ * runs dir / its parent — so they need their own rejection.
  */
 export function isUnsafeRunId(runId: string): boolean {
-  return runId !== path.basename(runId) || runId === ".." || runId.includes("\0");
+  return runId !== path.basename(runId) || runId === "." || runId === ".." || runId.includes("\0");
 }
 
 async function readFileOrUndefined(p: string): Promise<string | undefined> {
@@ -37,6 +41,9 @@ export interface ShowResult {
 
 /** Render a stored run's report.md, or report.json when `json` is true. */
 export async function showRun(outputRoot: string, runId: string, json = false): Promise<ShowResult> {
+  if (isUnsafeRunId(runId)) {
+    return { found: false, text: `show: "${runId}" is not a valid run id (must be a single run directory name).` };
+  }
   const dir = runDirFor(outputRoot, runId);
   const file = path.join(dir, json ? "report.json" : "report.md");
   const content = await readFileOrUndefined(file);
@@ -77,11 +84,20 @@ export function renderSignal(signal: ImprovementSignal): string {
 
 export interface SignalResult {
   found: boolean;
+  /**
+   * True when the signal file existed and was read but could not be parsed. Distinct from
+   * `found: false` (no file at all) so callers can tell "run doesn't exist" apart from
+   * "run exists but its data is corrupt" instead of collapsing both into not-found.
+   */
+  corrupt?: boolean;
   text: string;
 }
 
 /** Read and pretty-print `<runId>/improvement-signal.json`, or its raw JSON when `json` is true. */
 export async function showSignal(outputRoot: string, runId: string, json = false): Promise<SignalResult> {
+  if (isUnsafeRunId(runId)) {
+    return { found: false, text: `signal: "${runId}" is not a valid run id (must be a single run directory name).` };
+  }
   const dir = runDirFor(outputRoot, runId);
   const raw = await readFileOrUndefined(path.join(dir, "improvement-signal.json"));
   if (raw === undefined) {
@@ -97,6 +113,11 @@ export async function showSignal(outputRoot: string, runId: string, json = false
     const signal = JSON.parse(raw) as ImprovementSignal;
     return { found: true, text: renderSignal(signal) };
   } catch {
-    return { found: false, text: `signal: improvement-signal.json for run "${runId}" is not valid JSON.` };
+    // The file is present — only parsing failed. Report it as found-but-corrupt, not missing.
+    return {
+      found: true,
+      corrupt: true,
+      text: `signal: improvement-signal.json for run "${runId}" exists but is not valid JSON.`,
+    };
   }
 }

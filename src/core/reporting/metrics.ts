@@ -55,8 +55,11 @@ export function computeTrend(events: QualityEvent[]): Array<{ date: string; runs
   const byDay = new Map<string, { runs: number; verdicts: Record<string, number> }>();
   for (const e of events) {
     if (e.event_type !== "run_verdict") continue;
-    const date = e.ts.slice(0, 10);
-    if (!date) continue;
+    // Normalize via Date.parse rather than slicing the raw string, so a non-ISO-8601 timestamp
+    // can't silently produce a garbage day key. An unparsable timestamp drops the event.
+    const ms = e.ts ? Date.parse(e.ts) : NaN;
+    if (Number.isNaN(ms)) continue;
+    const date = new Date(ms).toISOString().slice(0, 10);
     const day = byDay.get(date) ?? { runs: 0, verdicts: {} };
     day.runs++;
     if (typeof e.result === "string") bump(day.verdicts, e.result);
