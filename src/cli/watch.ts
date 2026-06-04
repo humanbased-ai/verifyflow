@@ -46,13 +46,19 @@ export interface WatchAction {
  * not approved.
  */
 export function parseCrosscheckApprove(comments: IssueComment[]): boolean {
-  const isCrosscheck = (b: string) => /code review by/i.test(b) || /\[crosscheck\]/i.test(b);
+  // Identify Crosscheck comments specifically: its heading form `### Code Review by …` or the
+  // legacy `[crosscheck]` marker. A bare "code review by" substring would also match other
+  // review bots (CodeRabbit, Copilot, …), so require the heading anchor.
+  const isCrosscheck = (b: string) => /^#{1,6}\s*code review by/im.test(b) || /\[crosscheck\]/i.test(b);
   const cc = comments.filter((c) => isCrosscheck(c.body));
   const last = cc[cc.length - 1];
   if (!last) return false;
   const body = last.body;
   if (/needs work|request(?:ed)?\s+changes|\bblock\b/i.test(body)) return false;
-  return /✅\s*\*\*\s*approve\s*\*\*/i.test(body) || /verdict:\s*approve/i.test(body) || /\bapprove\b/i.test(body);
+  // Only the explicit APPROVE signals — the beta.6 badge or the legacy VERDICT line. A bare
+  // "approve" word is intentionally NOT accepted (it would match "cannot approve", "needs
+  // approval", etc. and could trigger a wrongful auto-merge).
+  return /✅\s*\*\*\s*approve\s*\*\*/i.test(body) || /verdict:\s*approve\b/i.test(body);
 }
 
 /**
@@ -76,9 +82,12 @@ export async function watchTick(
       continue; // transient; retry next tick (don't record the head as seen)
     }
     if (!parseCrosscheckApprove(comments)) continue;
-    seen.set(pr.number, pr.headSha); // mark verified-at-this-head before running (no hot retry)
     try {
       const r = await deps.verify(pr);
+      // Dedup only AFTER a completed verification (any returned verdict). If verify throws — e.g.
+      // a transient error — we do NOT stamp `seen`, so the head is retried on the next tick
+      // (every `interval`, not a hot loop) rather than being skipped permanently.
+      seen.set(pr.number, pr.headSha);
       acted.push({ pr: pr.number, headSha: pr.headSha, verdict: r.verdict, merged: r.merged });
     } catch (err) {
       acted.push({
@@ -95,11 +104,17 @@ export async function watchTick(
 
 // --- gh-backed I/O (live) ---------------------------------------------------------------------
 
+/** Max open PRs polled per tick; if a repo has more, the overflow is logged (not silently dropped). */
+const PR_LIST_LIMIT = 100;
+
 /** List a repo's open PRs via the authorized `gh` CLI. */
 export async function ghListOpenPrs(repo: string): Promise<PrSummary[]> {
-  const res = await run("gh", ["pr", "list", "--repo", repo, "--state", "open", "--json", "number,headRefOid", "--limit", "50"]);
+  const res = await run("gh", ["pr", "list", "--repo", repo, "--state", "open", "--json", "number,headRefOid", "--limit", String(PR_LIST_LIMIT)]);
   if (!res.executed || res.code !== 0) throw new Error(res.spawnError ?? `gh pr list failed: ${res.stderr.slice(0, 200)}`);
   const raw = JSON.parse(res.stdout || "[]") as { number: number; headRefOid: string }[];
+  if (raw.length >= PR_LIST_LIMIT) {
+    console.error(`[verifyflow] vf watch: ${repo} has >= ${PR_LIST_LIMIT} open PRs; only the first ${PR_LIST_LIMIT} are polled this tick.`);
+  }
   return raw.map((p) => ({ number: p.number, headSha: p.headRefOid }));
 }
 

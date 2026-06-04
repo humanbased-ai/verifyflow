@@ -367,7 +367,12 @@ async function cmdWatch(args: Args): Promise<number> {
     console.error("error: vf watch needs --repo <owner/repo>\n");
     return 2;
   }
-  const intervalMs = Math.max(10, Number(str(args.interval) ?? "60")) * 1000;
+  const intervalSec = Number(str(args.interval) ?? "60");
+  if (Number.isNaN(intervalSec)) {
+    console.error("error: --interval must be a number of seconds\n");
+    return 2;
+  }
+  const intervalMs = Math.max(10, intervalSec) * 1000;
   const autoMerge = !!args["auto-merge"];
   const level = str(args.level) ?? "functional";
   const seen = new Map<number, string>();

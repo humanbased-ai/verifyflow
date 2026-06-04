@@ -32,6 +32,16 @@ test("no crosscheck comment → not approved", () => {
   assert.equal(parseCrosscheckApprove([]), false);
 });
 
+test("a Crosscheck comment that merely contains the word 'approve' is NOT an approve (review fix)", () => {
+  const body = "### Code Review by Claude\n\nI cannot approve this yet — it needs approval from a second reviewer.";
+  assert.equal(parseCrosscheckApprove([{ body }]), false);
+});
+
+test("another bot's non-heading 'code review by' is not treated as Crosscheck (review fix)", () => {
+  // Has the APPROVE badge but is not a `### Code Review by` heading → not a Crosscheck comment.
+  assert.equal(parseCrosscheckApprove([{ body: "CodeRabbit code review by bot — ✅ **APPROVE**" }]), false);
+});
+
 // --- watchTick --------------------------------------------------------------
 
 function deps(over: Partial<WatchDeps>): WatchDeps {
@@ -98,6 +108,25 @@ test("a single PR's verify error is recorded and does not abort the tick", async
   assert.equal(acted.length, 2);
   assert.equal(acted.find((a) => a.pr === 1)!.verdict, "error");
   assert.equal(acted.find((a) => a.pr === 2)!.merged, true);
+});
+
+test("a thrown verify is not deduped — it retries on the next tick (review fix)", async () => {
+  let attempts = 0;
+  const seen = new Map<number, string>();
+  const d = deps({
+    listOpenPrs: async () => [{ number: 7, headSha: "aaa" }],
+    listIssueComments: async () => APPROVE,
+    verify: async () => {
+      attempts++;
+      if (attempts === 1) throw new Error("transient");
+      return { verdict: "accept", merged: true };
+    },
+  });
+  const t1 = await watchTick("o/r", d, seen);
+  assert.equal(t1[0]!.verdict, "error");
+  const t2 = await watchTick("o/r", d, seen);
+  assert.equal(t2[0]!.verdict, "accept", "retried after a transient verify error (not permanently skipped)");
+  assert.equal(attempts, 2);
 });
 
 test("comment-fetch failure for a PR is skipped without marking it seen (retries next tick)", async () => {
