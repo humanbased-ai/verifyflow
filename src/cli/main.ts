@@ -18,6 +18,8 @@ import type { UiHarness } from "../harness/ui/uiHarness.js";
 import { renderMarkdown, postPrComment } from "../core/reporting/reporter.js";
 import { computeMetrics, renderMetricsMarkdown } from "../core/reporting/metrics.js";
 import { buildStepSummary } from "./step.js";
+import { runInit } from "./init.js";
+import { runDoctor, renderDoctorReport } from "./doctor.js";
 
 const USAGE = `verifyflow — evidence-backed delivery verification
 
@@ -28,6 +30,8 @@ Usage:
                                       checks out + executes + posts the report comment, and prints
                                       a single machine-readable JSON line to stdout. Never blocks.
   vf report [--out <dir>] [--json]    Aggregate accumulated runs into quality-intelligence metrics.
+  vf init [--dir <path>]              Scaffold a verifyflow.config.json (default: current directory).
+  vf doctor                           Check that required tools (gh, claude, uv, LINEAR_API_KEY) are ready.
 
 Step-only options:
   --crosscheck-verdict <v>  Crosscheck verdict handed in by the caller (recorded, not gated on).
@@ -320,16 +324,40 @@ async function cmdReport(args: Args): Promise<number> {
   return 0;
 }
 
+/** `vf init [--dir <path>]` — scaffold a per-repo config (IN-611). */
+async function cmdInit(args: Args): Promise<number> {
+  const dir = str(args.dir) ? path.resolve(str(args.dir)!) : process.cwd();
+  const res = await runInit(dir);
+  if (res.created) {
+    console.log(`created ${res.path}`);
+    console.log("Edit it for your stack (setup / test / runPrefix), then run: vf run --help");
+  } else {
+    console.log(`${res.path} ${res.reason}`);
+  }
+  return 0;
+}
+
+/** `vf doctor` — check required tools/env are ready (IN-611). Exit non-zero if a required one is missing. */
+async function cmdDoctor(): Promise<number> {
+  const report = await runDoctor();
+  console.log(renderDoctorReport(report));
+  return report.ok ? 0 : 1;
+}
+
 async function main(): Promise<number> {
   const { cmd, args } = parseArgs(process.argv.slice(2));
-  if (args.help || cmd === "" || cmd === "help") {
+  // `help`, `--help`/`-h` as the first token, or any `--help`/`-h` flag → usage (exit 0).
+  // An empty invocation still prints usage but exits 2 (nothing to do).
+  if (args.help || cmd === "" || cmd === "help" || cmd === "--help" || cmd === "-h") {
     console.log(USAGE);
     return cmd === "" ? 2 : 0;
   }
   if (cmd === "run") return cmdRun(args);
   if (cmd === "step") return cmdStep(args);
   if (cmd === "report") return cmdReport(args);
-  console.error(`unknown command: ${cmd}\n`);
+  if (cmd === "init") return cmdInit(args);
+  if (cmd === "doctor") return cmdDoctor();
+  console.error(`error: unknown command "${cmd}"\n`);
   console.log(USAGE);
   return 2;
 }

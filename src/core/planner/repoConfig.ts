@@ -72,6 +72,20 @@ export function adaptCommand(command: string, cfg: RepoConfig): string {
   return `${cfg.runPrefix} ${command}`;
 }
 
+/**
+ * On-disk shape of `verifyflow.config.json` — the fields `readExplicit` reads. Shared with
+ * `vf init`'s scaffold writer (cli/init.ts) so the writer and reader can never drift. All
+ * fields optional; the loader fills sensible defaults.
+ */
+export interface VerifyflowFileConfig {
+  /** Free-form note; ignored by the loader. */
+  "//"?: string;
+  setup?: string[];
+  test?: string;
+  runPrefix?: string;
+  testGlobPrefix?: string;
+}
+
 export async function loadRepoConfig(workdir: string | undefined): Promise<RepoConfig> {
   if (workdir) {
     const explicit = await readExplicit(workdir);
@@ -93,9 +107,7 @@ export async function loadRepoConfig(workdir: string | undefined): Promise<RepoC
 async function readExplicit(workdir: string): Promise<RepoConfig | undefined> {
   try {
     const raw = await fs.readFile(path.join(workdir, "verifyflow.config.json"), "utf8");
-    const j = JSON.parse(raw) as {
-      setup?: string[]; test?: string; runPrefix?: string; testGlobPrefix?: string;
-    };
+    const j = JSON.parse(raw) as VerifyflowFileConfig;
     const testGlobPrefix = j.testGlobPrefix ?? j.test ?? "uv run pytest";
     const isPytest = /pytest/.test(testGlobPrefix);
     return {
