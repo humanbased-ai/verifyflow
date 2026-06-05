@@ -404,6 +404,10 @@ async function applyLlmJudgment(
     "VIOLATED. When the evidence merely does not PROVE the criterion (e.g. an implementation " +
     "constraint like 'not hardcoded' that execution cannot demonstrate), use `not_evaluable` — " +
     "do not punish the PR with `fail` for something that is simply unprovable by execution. " +
+    "Use `partial` when the evidence shows the criterion is only PARTIALLY satisfied or works only " +
+    "in limited conditions — more delivered than not, but not a clean full pass (e.g. the happy " +
+    "path works but a stated edge/error case does not). Reserve `partial` for softening an " +
+    "over-optimistic `pass`; never use it to soften a genuine violation, which stays `fail`. " +
     "CRITICAL: command/usage/environment errors (e.g. 'unrecognized arguments', argparse 'usage:' " +
     "dumps, 'No module named', 'command not found', 'Failed to spawn') mean the PROBE or its " +
     "environment is broken — NOT the product. Never base a `fail` on such output; that output is " +
