@@ -16,6 +16,9 @@ import { resolveAppSource, ghDeploymentLookup } from "../harness/ui/appSource.js
 import { PlaywrightBrowserDriver } from "../harness/ui/browserDriver.js";
 import { AgenticUiHarness } from "../harness/ui/agenticUiHarness.js";
 import type { UiHarness } from "../harness/ui/uiHarness.js";
+import { AgenticJourneyHarness, type CommandOutcome } from "../harness/journey/agenticJourneyHarness.js";
+import type { JourneyHarness } from "../harness/journey/journeyHarness.js";
+import { CommandRunner } from "../harness/commandRunner.js";
 import { renderMarkdown, postPrComment } from "../core/reporting/reporter.js";
 import {
   computeMetrics,
@@ -220,13 +223,15 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     co.logs.forEach((l) => console.error("  " + l));
   }
 
-  // For ui level: resolve a live app URL (explicit → preview → local) and build the AI-driven
-  // browser harness. The browser is an optional dependency; without it we leave the harness
-  // undefined so the pipeline blocks the criteria rather than false-passing them (IN-606).
+  // For ui/journey levels: resolve a live app URL (explicit → preview → local) and build the
+  // AI-driven harness. The browser is an optional dependency; without it (and, for journey,
+  // without a checkout for backend steps) we leave the harness undefined / capability-less so the
+  // pipeline blocks the criteria rather than false-passing them (IN-606 / IN-661).
   let resolvedBaseUrl = str(args["base-url"]);
   let uiHarnessFactory: ((artifactRoot: string) => UiHarness) | undefined;
+  let journeyHarnessFactory: ((artifactRoot: string) => JourneyHarness) | undefined;
   let appCleanup: (() => Promise<void>) | undefined;
-  if (level === "ui" && !fixtures) {
+  if ((level === "ui" || level === "journey") && !fixtures) {
     const prCtx = await github.loadPr(parsePrRef(pr));
     const repoConfig = await loadRepoConfig(workdir ? path.resolve(workdir) : undefined);
     const source = await resolveAppSource({
@@ -239,21 +244,57 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     if (source.kind === "ready") {
       resolvedBaseUrl = source.baseUrl;
       appCleanup = source.cleanup;
-      console.error(`[verifyflow] ui app source: ${source.source} → ${source.baseUrl}`);
+      console.error(`[verifyflow] ${level} app source: ${source.source} → ${source.baseUrl}`);
     } else {
-      console.error(`[verifyflow] ui: ${source.reason} — criteria will be environment-blocked.`);
+      console.error(`[verifyflow] ${level}: ${source.reason} — browser steps will be environment-blocked.`);
     }
 
     const driver = new PlaywrightBrowserDriver();
-    if (await driver.available()) {
-      const auth = str(args["ui-auth"]);
-      uiHarnessFactory = (artifactRoot) =>
-        new AgenticUiHarness({ driver, llm, artifactsDir: artifactRoot, storageStatePath: auth });
-    } else {
+    const browserOk = await driver.available();
+    if (!browserOk) {
       console.error(
-        "[verifyflow] ui: Playwright not installed — install with " +
-          "`npm i -D playwright && npx playwright install chromium`. Criteria will be blocked.",
+        "[verifyflow] " + level + ": Playwright not installed — install with " +
+          "`npm i -D playwright && npx playwright install chromium`. Browser steps will be blocked.",
       );
+    }
+    const auth = str(args["ui-auth"]);
+    if (level === "ui") {
+      if (browserOk) {
+        uiHarnessFactory = (artifactRoot) =>
+          new AgenticUiHarness({ driver, llm, artifactsDir: artifactRoot, storageStatePath: auth });
+      }
+    } else {
+      // journey: backend steps run shell commands in the checkout (if any); browser steps use the
+      // driver (if installed). With neither, the harness has no capability → criteria block.
+      const resolvedWorkdir = workdir ? path.resolve(workdir) : undefined;
+      if (!resolvedWorkdir) {
+        console.error(
+          "[verifyflow] journey: no --workdir/--checkout — backend steps will be blocked (browser steps only).",
+        );
+      }
+      journeyHarnessFactory = (artifactRoot) => {
+        const runCommand = resolvedWorkdir
+          ? async (command: string, label: string): Promise<CommandOutcome> => {
+              const runner = new CommandRunner(resolvedWorkdir, artifactRoot, { isolate: !args["no-sandbox"] });
+              const r = await runner.runStep({
+                id: `probe-${label}`,
+                kind: "command",
+                command,
+                description: `journey backend step ${label}`,
+                criterionIds: [],
+                reusedTestPoint: false,
+              });
+              return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr, evidence: r.evidence };
+            }
+          : undefined;
+        return new AgenticJourneyHarness({
+          llm,
+          artifactsDir: artifactRoot,
+          runCommand,
+          driver: browserOk ? driver : undefined,
+          storageStatePath: auth,
+        });
+      };
     }
   }
 
@@ -278,6 +319,7 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     memory: new MemoryStore(outputRoot),
     eventLog: new EventLog(outputRoot),
     uiHarnessFactory,
+    journeyHarnessFactory,
   };
 
   if (!request.workdir) {
