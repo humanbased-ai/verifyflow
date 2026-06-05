@@ -77,7 +77,8 @@ Options:
   --linear <KEY|url>     Linear issue (PRIMARY source of acceptance criteria).
                          If omitted, VerifyFlow derives it from the PR body's Linear link.
   --pr <ref>             GitHub PR URL, owner/repo#N, or #N.
-  --level <level>        functional | ui (AI-driven browser). journey not yet implemented.
+  --level <level>        functional | ui (AI-driven browser) | journey (multi-step end-to-end;
+                         seam ready, executor lands in Phase 2 — criteria block until then).
   --base-url <url>       Base URL of the running app for ui-level browser checks. If omitted,
                          VerifyFlow tries to discover a deployment preview from the PR's checks.
   --ui-auth <file>       Playwright storageState JSON (cookies/localStorage) for an authenticated
@@ -185,8 +186,8 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     console.error(USAGE);
     return 2;
   }
-  if (level !== "functional" && level !== "ui") {
-    console.error(`error: level "${level}" is not implemented yet (functional, ui).`);
+  if (level !== "functional" && level !== "ui" && level !== "journey") {
+    console.error(`error: unknown level "${level}" (functional, ui, journey).`);
     return 2;
   }
 
@@ -378,10 +379,10 @@ async function cmdDryRun(args: Args): Promise<number> {
     console.error(USAGE);
     return 2;
   }
-  // Mirror executeRun's guard: `journey` is a valid Level in the type system but is not yet
-  // implemented in either the real run or this preview, so reject it the same way here.
-  if (level !== "functional" && level !== "ui") {
-    console.error(`error: level "${level}" is not implemented yet (functional, ui).`);
+  // Mirror executeRun's guard: accept the known levels (journey is seam-only until Phase 2 —
+  // its criteria block rather than execute), reject anything else.
+  if (level !== "functional" && level !== "ui" && level !== "journey") {
+    console.error(`error: unknown level "${level}" (functional, ui, journey).`);
     return 2;
   }
   const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");

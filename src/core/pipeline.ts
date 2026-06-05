@@ -14,6 +14,8 @@ import type {
 } from "../types.js";
 import { type UiHarness, UnavailableUiHarness } from "../harness/ui/uiHarness.js";
 import { runUiChecks } from "../harness/ui/runUiChecks.js";
+import { type JourneyHarness, UnavailableJourneyHarness } from "../harness/journey/journeyHarness.js";
+import { runJourneyChecks } from "../harness/journey/runJourneyChecks.js";
 import type { LlmClient } from "../backends/llm.js";
 import type { MemoryStore } from "../memory/store.js";
 import type { EventLog } from "../memory/eventLog.js";
@@ -46,6 +48,10 @@ export interface PipelineDeps {
    * precedence over `uiHarness` when provided.
    */
   uiHarnessFactory?: (artifactRoot: string) => UiHarness;
+  /** Journey execution backend for level=journey (IN-659). Defaults to UnavailableJourneyHarness. */
+  journeyHarness?: JourneyHarness;
+  /** Builds the journey harness once the artifact dir is known (mirrors uiHarnessFactory). */
+  journeyHarnessFactory?: (artifactRoot: string) => JourneyHarness;
 }
 
 export interface PipelineOutput {
@@ -106,7 +112,41 @@ async function buildEvaluationPlan(
   // The artifact root for an executing harness, or `undefined` for plan-only mode (`--dry-run`):
   // no probes/tests run, so no execution harness is constructed and nothing touches the filesystem.
   artifactRoot?: string,
-): Promise<{ plan: EvaluationPlan; repoConfigSource: string; ui?: UiHarness; cfg?: RepoConfig }> {
+): Promise<{
+  plan: EvaluationPlan;
+  repoConfigSource: string;
+  ui?: UiHarness;
+  journey?: JourneyHarness;
+  cfg?: RepoConfig;
+}> {
+  if (req.level === "journey") {
+    // Journey level: multi-step end-to-end checks (IN-659). The executor is a backend behind the
+    // JourneyHarness seam; until it is wired (Phase 2 / IN-661) the default reports checks as not
+    // executed → criteria block, never falsely pass. Mirrors the ui branch below, including the
+    // plan-only guard: in --dry-run we never execute, so we must NOT construct a real harness.
+    const journey =
+      artifactRoot === undefined
+        ? undefined
+        : deps.journeyHarnessFactory?.(artifactRoot) ?? deps.journeyHarness ?? new UnavailableJourneyHarness();
+    const harnessName = journey?.name ?? deps.journeyHarness?.name ?? "journey harness";
+    for (const c of criteria.criteria) {
+      if (c.observable) c.probe = { command: `journey-check: ${c.text}`, fromTicket: true };
+    }
+    const plan: EvaluationPlan = {
+      level: "journey",
+      steps: criteria.criteria
+        .filter((c) => c.observable)
+        .map((c) => ({
+          id: `probe-${c.id}`,
+          kind: "inspect",
+          description: `journey check for ${c.id}`,
+          criterionIds: [c.id],
+          reusedTestPoint: false,
+        })),
+      notes: [`journey level: multi-step end-to-end checks via ${harnessName}`],
+    };
+    return { plan, repoConfigSource: "n/a", journey };
+  }
   if (req.level === "ui") {
     // UI level: browser-driven checks (IN-559). The browser is an execution backend behind the
     // UiHarness seam; until a real driver is wired the default reports checks as not executed.
@@ -182,7 +222,7 @@ export async function runVerification(
   const artifactRoot = path.join(runDir, "artifacts");
 
   // --- Plan + real execution (level-specific) -----------------------------------------
-  const { plan, repoConfigSource, ui, cfg } = await buildEvaluationPlan(
+  const { plan, repoConfigSource, ui, journey, cfg } = await buildEvaluationPlan(
     req,
     deps,
     criteria,
@@ -191,7 +231,11 @@ export async function runVerification(
   );
   const results: HarnessResult[] = [];
 
-  if (req.level === "ui") {
+  if (req.level === "journey") {
+    // buildEvaluationPlan always returns a defined `journey` for level=journey (it constructs the
+    // executor or an UnavailableJourneyHarness itself), so the non-null assertion is the invariant.
+    results.push(...(await runJourneyChecks(journey!, criteria, req.baseUrl)));
+  } else if (req.level === "ui") {
     // buildEvaluationPlan always returns a defined `ui` for level=ui (it constructs the driver or
     // an UnavailableUiHarness itself), so the non-null assertion is the real invariant here.
     results.push(...(await runUiChecks(ui!, criteria, req.baseUrl)));
