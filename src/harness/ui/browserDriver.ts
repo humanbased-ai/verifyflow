@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { Evidence } from "../../types.js";
 
 /**
  * Browser execution backend for the ui level (IN-606, PR-2).
@@ -35,6 +36,11 @@ export interface BrowserSession {
   observe(): Promise<PageObservation>;
   /** Execute one action. Returns ok:false (with reason) instead of throwing on a recoverable miss. */
   perform(action: BrowserAction): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Flush end-of-session artifacts (e.g. a Playwright trace zip) and return them as evidence.
+   * Optional — the fake driver omits it. The harness calls it once, before close().
+   */
+  finalize?(): Promise<Evidence[]>;
   close(): Promise<void>;
 }
 
@@ -70,10 +76,18 @@ interface PwPage {
   keyboard: { press(key: string): Promise<unknown> };
   waitForTimeout(ms: number): Promise<unknown>;
 }
+interface PwTracing {
+  start(opts: Record<string, unknown>): Promise<unknown>;
+  stop(opts: Record<string, unknown>): Promise<unknown>;
+}
+interface PwContext {
+  newPage(): Promise<PwPage>;
+  tracing: PwTracing;
+}
 interface PwLike {
   chromium: {
     launch(opts: { headless: boolean }): Promise<{
-      newContext(opts: Record<string, unknown>): Promise<{ newPage(): Promise<PwPage> }>;
+      newContext(opts: Record<string, unknown>): Promise<PwContext>;
       close(): Promise<void>;
     }>;
   };
@@ -92,6 +106,7 @@ async function optionalImport<T>(name: string): Promise<T> {
 export class PlaywrightBrowserDriver implements BrowserDriver {
   readonly name = "playwright-chromium";
   private screenshotSeq = 0;
+  private traceSeq = 0;
 
   async available(): Promise<boolean> {
     try {
@@ -108,6 +123,15 @@ export class PlaywrightBrowserDriver implements BrowserDriver {
     const context = await browser.newContext(
       opts.storageStatePath ? { storageState: opts.storageStatePath } : {},
     );
+    // Record a Playwright trace (screenshots + DOM snapshots + network) for the whole session;
+    // finalize() saves it as browser_trace evidence. Best-effort — tracing is optional in older
+    // Playwright builds, so a failure here must not break the run.
+    let tracing = true;
+    try {
+      await context.tracing.start({ screenshots: true, snapshots: true });
+    } catch {
+      tracing = false;
+    }
     const page = await context.newPage();
 
     let consoleErrors: string[] = [];
@@ -183,6 +207,17 @@ export class PlaywrightBrowserDriver implements BrowserDriver {
           }
         } catch (err) {
           return { ok: false, error: err instanceof Error ? err.message.slice(0, 200) : String(err) };
+        }
+      },
+      async finalize(): Promise<Evidence[]> {
+        if (!tracing) return [];
+        tracing = false; // stop only once
+        const rel = path.join("ui", `trace-${++driver.traceSeq}.zip`);
+        try {
+          await context.tracing.stop({ path: path.join(opts.artifactsDir, rel) });
+          return [{ type: "browser_trace", summary: "Playwright session trace (open in `npx playwright show-trace`)", path: rel }];
+        } catch {
+          return [];
         }
       },
       async close() {

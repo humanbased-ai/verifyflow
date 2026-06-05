@@ -46,7 +46,7 @@ VerifyFlow stores **no secrets**. It reuses CLIs you have already installed and 
 | `claude` (authenticated) | LLM backend (criteria parsing, judging, UI agent) | recommended* |
 | `LINEAR_API_KEY` env var | reading the Linear issue (the criteria source) | yes (live mode) |
 | `uv` / `npm` / … | running the target repo's setup & tests | per target repo |
-| `playwright` | `ui` level browser checks | only for `--level ui` |
+| `playwright` (+ browser) | `ui` / `journey` level browser checks | only for browser steps; an optional dependency (auto-installed by `npm install`), browsers via `npx playwright install` |
 
 *Without `claude`, VerifyFlow falls back to a deterministic rules-only backend (reduced quality,
 never a hard failure). Offline runs can replace GitHub/Linear with fixtures (`--fixtures`).
@@ -58,11 +58,15 @@ npm run build          # compile to dist/ (provides the vf / verifyflow bins)
 npm run vf -- run --help
 ```
 
-For `ui` level only:
+For `ui` / `journey` browser checks — `playwright` is an optional dependency, so `npm install`
+already pulls the library; you only need to download the browser binary:
 
 ```bash
-npm i -D playwright && npx playwright install chromium
+npx playwright install chromium
+# (if the optional dep was skipped, e.g. --no-optional: npm i -D playwright first)
 ```
+
+`vf doctor` reports whether Playwright is importable and prints this hint when it isn't.
 
 ---
 
