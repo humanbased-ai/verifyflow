@@ -18,14 +18,36 @@ const EVIDENCE_ICON: Partial<Record<Evidence["type"], string>> = {
   test_report: "🧪",
 };
 
-/** Render one evidence reference for the report table, with a type hint for visual artifacts. */
-function renderEvidenceRef(e: Evidence): string {
-  const ref = e.path ?? e.ref ?? e.type;
-  const icon = EVIDENCE_ICON[e.type];
-  return icon ? `${icon} \`${ref}\`` : `\`${ref}\``;
+export interface RenderOptions {
+  /**
+   * IN-675: map from `evidence.path` to a public URL where the artifact is hosted (see
+   * evidenceUpload.ts). When present, visual-evidence references become clickable links and
+   * the report gains an inline screenshot section. Absent for local/fixture runs, which keep
+   * rendering bare on-disk paths.
+   */
+  evidenceUrls?: Record<string, string>;
 }
 
-export function renderMarkdown(report: RunReport): string {
+/** Render one evidence reference for the report table, with a type hint for visual artifacts. */
+function renderEvidenceRef(e: Evidence, urls?: Record<string, string>): string {
+  const ref = e.path ?? e.ref ?? e.type;
+  const icon = EVIDENCE_ICON[e.type];
+  const label = icon ? `${icon} \`${ref}\`` : `\`${ref}\``;
+  const url = e.path ? urls?.[e.path] : undefined;
+  return url ? `[${label}](${url})` : label;
+}
+
+/** The key screenshot for a criterion is its last one — the final/most-relevant observed state. */
+function keyScreenshot(evidence: Evidence[], urls: Record<string, string>): Evidence | undefined {
+  let last: Evidence | undefined;
+  for (const e of evidence) {
+    if (e.type === "screenshot" && e.path && urls[e.path]) last = e;
+  }
+  return last;
+}
+
+export function renderMarkdown(report: RunReport, opts: RenderOptions = {}): string {
+  const urls = opts.evidenceUrls ?? {};
   const r = report;
   const lines: string[] = [];
   lines.push(`# VerifyFlow delivery report — ${r.issue.key}`);
@@ -51,7 +73,7 @@ export function renderMarkdown(report: RunReport): string {
   lines.push(`| # | Criterion | Result | Method | Evidence |`);
   lines.push(`| --- | --- | --- | --- | --- |`);
   for (const c of r.criterionResults) {
-    const ev = c.evidence.map(renderEvidenceRef).join("<br>") || "—";
+    const ev = c.evidence.map((e) => renderEvidenceRef(e, urls)).join("<br>") || "—";
     lines.push(
       `| ${c.criterionId} | ${escapePipes(c.criterion)} | ${EMOJI[c.result] ?? ""} ${c.result} | ${c.method} | ${ev} |`,
     );
@@ -63,6 +85,25 @@ export function renderMarkdown(report: RunReport): string {
     lines.push(`- **${c.criterionId}** (${c.result}, confidence ${c.confidence.toFixed(2)}): ${c.reason}`);
   }
   lines.push("");
+
+  // Inline screenshots (IN-675): artifacts live on the runner's disk, unreachable by a reviewer.
+  // When hosted (urls present), embed the key screenshot per criterion so the comment shows the
+  // actual observed state, not just a filename. Bounded to one image per criterion to stay readable.
+  const shots: Array<{ c: (typeof r.criterionResults)[number]; e: Evidence }> = [];
+  for (const c of r.criterionResults) {
+    const e = keyScreenshot(c.evidence, urls);
+    if (e) shots.push({ c, e });
+  }
+  if (shots.length) {
+    lines.push("### Screenshots");
+    lines.push("");
+    for (const { c, e } of shots) {
+      lines.push(`**${c.criterionId}** ${EMOJI[c.result] ?? ""} ${c.result} — ${escapePipes(c.criterion)}`);
+      lines.push("");
+      lines.push(`![${e.summary ?? c.criterionId}](${urls[e.path!]})`);
+      lines.push("");
+    }
+  }
 
   // Evidence excerpts (IN-579): artifacts live on the runner's disk, which a PR reviewer
   // cannot reach — inline the captured output in collapsed blocks, deduped by artifact path.

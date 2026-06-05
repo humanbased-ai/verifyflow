@@ -95,3 +95,17 @@ Each report should include:
 ## Report Rule
 
 VerifyFlow should not mark a criterion as `pass` without evidence.
+
+## Hosting visual evidence (IN-675)
+
+Screenshots, the Playwright trace, and video live under the runner's artifact root, which a PR
+reviewer cannot reach. When `--comment` is set, VerifyFlow pushes those artifacts to a dedicated
+`verifyflow-evidence` branch in the target repo (one commit per run, under `<pr>-<commit>/…`) and
+rewrites the PR comment to reference them by `raw.githubusercontent.com` URL:
+
+- The **key screenshot per criterion** (its last/final one) is embedded inline as an image.
+- `browser_trace` and other hosted artifacts render as clickable links.
+- Local and fixture runs do not upload — the report falls back to bare on-disk paths.
+
+Operation video (`.webm` via Playwright `recordVideo`) is not captured yet; it is tracked as a
+follow-up.
