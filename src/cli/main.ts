@@ -20,6 +20,7 @@ import { AgenticJourneyHarness, type CommandOutcome } from "../harness/journey/a
 import type { JourneyHarness } from "../harness/journey/journeyHarness.js";
 import { CommandRunner } from "../harness/commandRunner.js";
 import { renderMarkdown, postPrComment } from "../core/reporting/reporter.js";
+import { publishEvidenceArtifacts, EVIDENCE_BRANCH } from "../core/reporting/evidenceUpload.js";
 import {
   computeMetrics,
   renderMetricsMarkdown,
@@ -343,7 +344,13 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
 
   let prCommentPosted = false;
   if (args.comment && !fixtures) {
-    prCommentPosted = await postPrComment(report, renderMarkdown(report));
+    // IN-675: host visual evidence (screenshots/trace) so the comment can embed it; best-effort,
+    // an empty map just falls back to bare on-disk paths.
+    const evidenceUrls = await publishEvidenceArtifacts(report, runDir);
+    if (Object.keys(evidenceUrls).length) {
+      console.error(`[verifyflow] hosted ${Object.keys(evidenceUrls).length} evidence artifact(s) on ${EVIDENCE_BRANCH}.`);
+    }
+    prCommentPosted = await postPrComment(report, renderMarkdown(report, { evidenceUrls }));
     console.error(
       prCommentPosted ? "[verifyflow] posted/updated PR comment." : "[verifyflow] failed to post PR comment.",
     );
