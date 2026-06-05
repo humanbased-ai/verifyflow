@@ -78,6 +78,40 @@ test("no capability wired (no runCommand, no driver) → available() false and r
   assert.equal(r.executed, false); // blocked, never falsely passed/failed
 });
 
+test("poll: re-runs until the downstream signal appears, then concludes pass (IN-662)", async () => {
+  const llm = scriptedLlm([
+    JSON.stringify({ action: { kind: "poll", poll: { command: "check-webhook", expectSubstring: "delivered", timeoutMs: 10000, intervalMs: 1 } } }),
+    JSON.stringify({ conclusion: "pass", observation: "webhook was delivered downstream" }),
+  ]);
+  let n = 0;
+  const run = async (): Promise<CommandOutcome> => {
+    n++;
+    return { exitCode: 0, stdout: n >= 3 ? "status: delivered" : "status: pending", stderr: "" };
+  };
+  const h = new AgenticJourneyHarness({ llm, artifactsDir: "/tmp", runCommand: run, sleep: async () => {} });
+  const r = await h.check(check, undefined);
+  assert.equal(r.executed, true);
+  assert.equal(r.passed, true);
+  assert.ok(n >= 3, "polled until the signal appeared");
+});
+
+test("poll timeout → downstream signal absent → blocked, never fail (IN-662)", async () => {
+  const llm = scriptedLlm([
+    JSON.stringify({ action: { kind: "poll", poll: { command: "check-row", expectSubstring: "ok", timeoutMs: 5, intervalMs: 1 } } }),
+    JSON.stringify({ conclusion: "cannot_verify", observation: "row not persisted within timeout" }),
+  ]);
+  let now = 0;
+  const h = new AgenticJourneyHarness({
+    llm,
+    artifactsDir: "/tmp",
+    runCommand: async () => ({ exitCode: 0, stdout: "status: pending", stderr: "" }),
+    sleep: async () => {},
+    now: () => (now += 3), // advance past the 5ms budget after ~2 attempts
+  });
+  const r = await h.check(check, undefined);
+  assert.equal(r.executed, false, "a downstream signal absent within the timeout must block, never fail");
+});
+
 test("browser step uses the driver; missing base URL blocks the browser action", async () => {
   const llm = scriptedLlm([
     JSON.stringify({ action: { kind: "browser", browser: { kind: "navigate", value: "/" } } }),

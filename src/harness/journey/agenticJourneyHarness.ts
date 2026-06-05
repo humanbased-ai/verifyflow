@@ -28,15 +28,23 @@ const SYSTEM = `You are a meticulous end-to-end tester verifying ONE acceptance 
 in one of these shapes:
   {"thought":"...","action":{"kind":"run","command":"<shell command run in the repo checkout>"}}
   {"thought":"...","action":{"kind":"browser","browser":{"kind":"navigate|click|type|press|wait","selector":"<css or text=...>","value":"<url|text|key|ms>"}}}
+  {"thought":"...","action":{"kind":"poll","poll":{"command":"<shell command>","expectSubstring":"<text that must appear>","timeoutMs":30000,"intervalMs":2000}}}
   {"thought":"...","conclusion":"pass|fail|cannot_verify","observation":"<what across the steps justifies this>"}
 Rules:
 - Compose the minimum steps needed across backend and browser, then conclude.
-- "run" executes a shell command in the checked-out repo (use it for preconditions, downstream/DB/API assertions).
+- "run" executes a shell command in the checked-out repo (use it for preconditions, DB/API assertions).
+- "poll" RE-RUNS a command until its output contains expectSubstring (or its exit matches expectExitCode), or the
+  timeout elapses. Use it for DOWNSTREAM / ASYNC results: a webhook delivered, an event consumed, a notification or
+  email queued, a row persisted, a job finished. If the signal is NOT observed within the timeout, that is
+  cannot_verify (the downstream system may just be slow) — NEVER fail on a poll timeout.
 - "browser" drives the live app (only if a base URL is available).
-- conclusion "pass": you directly observed the expected end-to-end outcome.
-- conclusion "fail": you completed the steps and the expected outcome was clearly ABSENT or wrong. Only when certain.
-- conclusion "cannot_verify": you cannot reach a confident verdict — a tool is unavailable, a step errored, a timeout,
-  a login wall, or an ambiguous criterion. When in doubt, choose cannot_verify, NEVER fail.`;
+- Also cover, when the criterion implies them: role / account-state VARIATION (re-run the flow as a different
+  role/state) and NEIGHBORING REGRESSION (check an adjacent behavior the change should not have broken).
+- conclusion "pass": you directly observed the expected end-to-end outcome (including any required downstream signal).
+- conclusion "fail": you completed the steps and the expected outcome was clearly ABSENT or wrong. Only when certain,
+  and never solely because a poll timed out.
+- conclusion "cannot_verify": you cannot reach a confident verdict — a tool is unavailable, a step errored, a poll
+  timed out, a login wall, or an ambiguous criterion. When in doubt, choose cannot_verify, NEVER fail.`;
 
 export type AgentConclusion = "pass" | "fail" | "cannot_verify";
 
@@ -50,10 +58,20 @@ export interface CommandOutcome {
 /** Runs a backend shell command in the checkout. `label` distinguishes steps for evidence/log naming. */
 export type CommandExecutor = (command: string, label: string) => Promise<CommandOutcome>;
 
+/** Downstream/async assertion: re-run `command` until it matches, or the timeout elapses. */
+export interface PollSpec {
+  command: string;
+  expectSubstring?: string;
+  expectExitCode?: number;
+  timeoutMs?: number;
+  intervalMs?: number;
+}
+
 interface JourneyAction {
-  kind: "run" | "browser";
+  kind: "run" | "browser" | "poll";
   command?: string;
   browser?: BrowserAction;
+  poll?: PollSpec;
 }
 
 interface AgentReply {
@@ -75,7 +93,16 @@ export interface AgenticJourneyOptions {
   maxSteps?: number;
   failConfirmations?: number;
   maxConsecutiveActionErrors?: number;
+  /** Sleep between poll attempts (injectable so tests don't wait real time). Defaults to setTimeout. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Clock for poll deadlines (injectable for tests). Defaults to Date.now. */
+  now?: () => number;
 }
+
+// Bounds so a model-supplied poll spec can't hang the run or hammer a command.
+const POLL_MAX_TIMEOUT_MS = 120_000;
+const POLL_MIN_INTERVAL_MS = 100;
+const POLL_MAX_ATTEMPTS = 60;
 
 interface RunOutcome {
   conclusion: AgentConclusion;
@@ -93,6 +120,8 @@ export class AgenticJourneyHarness implements JourneyHarness {
       maxSteps: 12,
       failConfirmations: 2,
       maxConsecutiveActionErrors: 3,
+      sleep: (ms: number) => new Promise((r) => setTimeout(r, ms)),
+      now: () => Date.now(),
       ...opts,
     };
   }
@@ -191,6 +220,50 @@ export class AgenticJourneyHarness implements JourneyHarness {
           if (res.ok) consecutiveActionErrors = 0;
           else if (++consecutiveActionErrors >= this.o.maxConsecutiveActionErrors) {
             return fail(`gave up after ${consecutiveActionErrors} failed browser actions (last: ${res.error})`);
+          }
+        } else if (act.kind === "poll") {
+          if (!this.o.runCommand) {
+            history.push(`poll "${act.poll?.command ?? ""}" → unavailable (no checkout / backend executor)`);
+            if (++consecutiveActionErrors >= this.o.maxConsecutiveActionErrors) {
+              return fail("poll execution is unavailable (run with --checkout/--workdir)");
+            }
+            continue;
+          }
+          if (!act.poll?.command) return fail("poll action missing its `poll.command`");
+          const spec = act.poll;
+          const timeoutMs = Math.min(Math.max(spec.timeoutMs ?? 30_000, 0), POLL_MAX_TIMEOUT_MS);
+          const intervalMs = Math.max(spec.intervalMs ?? 2_000, POLL_MIN_INTERVAL_MS);
+          // Match on substring when given; otherwise on exit code (default 0).
+          const expectExit = spec.expectExitCode ?? (spec.expectSubstring ? undefined : 0);
+          const deadline = this.o.now() + timeoutMs;
+          let attempts = 0;
+          let matched = false;
+          let lastOut: CommandOutcome = { exitCode: null, stdout: "", stderr: "" };
+          while (attempts < POLL_MAX_ATTEMPTS) {
+            attempts++;
+            lastOut = await this.o.runCommand(spec.command, `journey-poll-${++cmdSeq}-a${attempts}`);
+            const text = lastOut.stdout + (lastOut.stderr ? `\n${lastOut.stderr}` : "");
+            const exitOk = expectExit === undefined || lastOut.exitCode === expectExit;
+            const subOk = !spec.expectSubstring || text.includes(spec.expectSubstring);
+            if (exitOk && subOk) {
+              matched = true;
+              break;
+            }
+            if (this.o.now() >= deadline) break;
+            await this.o.sleep(intervalMs);
+          }
+          if (lastOut.evidence) evidence.push(...lastOut.evidence);
+          const cond = spec.expectSubstring ? `output contains "${spec.expectSubstring}"` : `exit ${expectExit}`;
+          if (matched) {
+            history.push(`poll "${spec.command}" → matched (${cond}) after ${attempts} attempt(s)`);
+            consecutiveActionErrors = 0;
+          } else {
+            // Downstream signal not observed within the budget. Surface it as an informative result
+            // (NOT an action error): the agent must treat a poll timeout as cannot_verify, never fail.
+            history.push(
+              `poll "${spec.command}" → NOT observed (${cond}) within ${timeoutMs}ms / ${attempts} attempt(s) ` +
+                `— downstream signal absent; this is cannot_verify, never fail`,
+            );
           }
         } else {
           return fail(`unknown action kind: ${(act as JourneyAction).kind}`);
