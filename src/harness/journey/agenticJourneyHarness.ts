@@ -271,7 +271,15 @@ export class AgenticJourneyHarness implements JourneyHarness {
       }
       return fail(`step budget (${this.o.maxSteps}) exhausted without a conclusion`);
     } finally {
-      if (session) await session.close().catch(() => {});
+      if (session) {
+        // Flush the session trace as evidence (best-effort) before closing — see the UI harness note.
+        try {
+          if (session.finalize) evidence.push(...(await session.finalize()));
+        } catch {
+          /* trace is best-effort evidence */
+        }
+        await session.close().catch(() => {});
+      }
     }
   }
 

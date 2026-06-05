@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AgenticJourneyHarness, type CommandOutcome } from "./agenticJourneyHarness.js";
-import { FakeBrowserDriver } from "../ui/browserDriver.js";
+import { FakeBrowserDriver, type BrowserDriver } from "../ui/browserDriver.js";
 import type { LlmClient } from "../../backends/llm.js";
 
 /** A fake LLM that replays a queued list of raw JSON replies, one per turn. */
@@ -110,6 +110,27 @@ test("poll timeout → downstream signal absent → blocked, never fail (IN-662)
   });
   const r = await h.check(check, undefined);
   assert.equal(r.executed, false, "a downstream signal absent within the timeout must block, never fail");
+});
+
+test("IN-663: a browser session trace is collected as browser_trace evidence via finalize()", async () => {
+  const llm = scriptedLlm([
+    JSON.stringify({ action: { kind: "browser", browser: { kind: "navigate", value: "/" } } }),
+    JSON.stringify({ conclusion: "pass", observation: "saw it" }),
+  ]);
+  const tracingDriver: BrowserDriver = {
+    name: "fake-trace",
+    available: async () => true,
+    open: async () => ({
+      observe: async () => ({ url: "u", title: "t", domSummary: "", consoleErrors: [] }),
+      perform: async () => ({ ok: true }),
+      finalize: async () => [{ type: "browser_trace", path: "ui/trace-1.zip", summary: "trace" }],
+      close: async () => {},
+    }),
+  };
+  const h = new AgenticJourneyHarness({ llm, artifactsDir: "/tmp", driver: tracingDriver });
+  const r = await h.check(check, "http://localhost:3000");
+  assert.equal(r.passed, true);
+  assert.ok(r.evidence.some((e) => e.type === "browser_trace"), "session trace is attached as evidence");
 });
 
 test("browser step uses the driver; missing base URL blocks the browser action", async () => {

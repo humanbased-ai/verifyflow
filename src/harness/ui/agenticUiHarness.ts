@@ -172,6 +172,13 @@ export class AgenticUiHarness implements UiHarness {
         evidence,
       };
     } finally {
+      // Flush the session trace as evidence (best-effort) before closing. `evidence` is the same
+      // array referenced by the already-returned RunOutcome, so pushing here is visible to the caller.
+      try {
+        if (session.finalize) evidence.push(...(await session.finalize()));
+      } catch {
+        /* trace is best-effort evidence */
+      }
       await session.close().catch(() => {});
     }
   }
