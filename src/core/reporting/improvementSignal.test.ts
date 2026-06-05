@@ -59,6 +59,29 @@ test("a failing criterion produces one actionable signal item with expected/obse
   assert.deepEqual(item.evidence, ["probe-AC-1.log"]);
 });
 
+test("IN-628: a not_evaluable criterion is not bounced back (only fail/partial/blocked are)", () => {
+  const mixed = report({
+    criterionResults: [
+      { criterionId: "AC-1", criterion: criteria[0]!.text, result: "fail", method: "backend", reason: "exited 3", evidence: [{ type: "command_output", path: "probe-AC-1.log" }], confidence: 0.85, failureCategory: "missing_implementation" },
+      { criterionId: "AC-2", criterion: criteria[1]!.text, result: "not_evaluable", method: "backend", reason: "could not verify", evidence: [], confidence: 0.3 },
+    ],
+  } as unknown as Partial<RunReport["criterionResults"]>);
+  const signal = buildImprovementSignal(mixed, criteria, results);
+  assert.ok(signal);
+  assert.equal(signal!.items.length, 1, "only the failing criterion bounces back, not the not_evaluable one");
+  assert.equal(signal!.items[0]!.criterionId, "AC-1");
+});
+
+test("a run whose only non-pass is not_evaluable produces no signal", () => {
+  const onlyNotEvaluable = report({
+    criterionResults: [
+      { criterionId: "AC-1", criterion: "x", result: "pass", method: "backend", reason: "ok", evidence: [], confidence: 0.9 },
+      { criterionId: "AC-2", criterion: "y", result: "not_evaluable", method: "backend", reason: "could not verify", evidence: [], confidence: 0.3 },
+    ],
+  } as unknown as Partial<RunReport["criterionResults"]>);
+  assert.equal(buildImprovementSignal(onlyNotEvaluable, criteria, results), undefined);
+});
+
 test("an all-pass run produces no signal (nothing to bounce back)", () => {
   const allPass = report({
     criterionResults: [
