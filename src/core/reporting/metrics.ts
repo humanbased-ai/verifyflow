@@ -23,6 +23,57 @@ export interface QualityMetrics {
 const rate = (num: number, den: number) => (den === 0 ? 0 : num / den);
 const bump = (m: Record<string, number>, k: string) => (m[k] = (m[k] ?? 0) + 1);
 
+/** Scope filters for `vf report` (IN-625): metrics can be narrowed instead of always aggregating. */
+export interface MetricsFilter {
+  /** ISO date/datetime lower bound (inclusive) on the event timestamp. */
+  since?: string;
+  /** Exact owner/repo match. */
+  repo?: string;
+  /** Exact evaluation level match. */
+  level?: string;
+}
+
+/**
+ * Restrict the event log to a scope before computing metrics. An unparsable `since` is ignored
+ * (treated as no lower bound) so a typo can't silently drop every event.
+ */
+export function filterEvents(events: QualityEvent[], filter: MetricsFilter = {}): QualityEvent[] {
+  const sinceMs = filter.since ? Date.parse(filter.since) : NaN;
+  return events.filter((e) => {
+    if (filter.repo && e.repo !== filter.repo) return false;
+    if (filter.level && e.level !== filter.level) return false;
+    if (!Number.isNaN(sinceMs)) {
+      const ts = Date.parse(e.ts);
+      if (Number.isNaN(ts) || ts < sinceMs) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Per-day run-verdict counts, oldest first — a simple over-time trend for `vf report`.
+ *
+ * Days are bucketed by the UTC date of the event's `ts` (parsed, then re-rendered via
+ * `toISOString().slice(0,10)`), so the boundary is a UTC day — runs near local midnight bucket by
+ * their UTC date, not the operator's local date.
+ */
+export function computeTrend(events: QualityEvent[]): Array<{ date: string; runs: number; verdicts: Record<string, number> }> {
+  const byDay = new Map<string, { runs: number; verdicts: Record<string, number> }>();
+  for (const e of events) {
+    if (e.event_type !== "run_verdict") continue;
+    // Normalize via Date.parse rather than slicing the raw string, so a non-ISO-8601 timestamp
+    // can't silently produce a garbage day key. An unparsable timestamp drops the event.
+    const ms = e.ts ? Date.parse(e.ts) : NaN;
+    if (Number.isNaN(ms)) continue;
+    const date = new Date(ms).toISOString().slice(0, 10);
+    const day = byDay.get(date) ?? { runs: 0, verdicts: {} };
+    day.runs++;
+    if (typeof e.result === "string") bump(day.verdicts, e.result);
+    byDay.set(date, day);
+  }
+  return [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([date, v]) => ({ date, ...v }));
+}
+
 export function computeMetrics(events: QualityEvent[]): QualityMetrics {
   const crit = events.filter((e) => e.event_type === "acceptance_criterion_result");
   const runs = events.filter((e) => e.event_type === "run_verdict");
@@ -89,6 +140,25 @@ const table = (m: Record<string, number>) =>
     .sort((a, b) => b[1] - a[1])
     .map(([k, v]) => `- ${k}: ${v}`)
     .join("\n") || "- (none)";
+
+/** Render a per-day verdict trend as markdown (appended to the report when `--trend` is passed). */
+export function renderTrendMarkdown(
+  trend: Array<{ date: string; runs: number; verdicts: Record<string, number> }>,
+): string {
+  const lines = ["## Over-time trend (runs/day)"];
+  if (trend.length === 0) {
+    lines.push("- (no run data)");
+    return lines.join("\n") + "\n";
+  }
+  for (const d of trend) {
+    const v = Object.entries(d.verdicts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => `${k}=${n}`)
+      .join(", ");
+    lines.push(`- ${d.date}: ${d.runs} run(s)${v ? ` (${v})` : ""}`);
+  }
+  return lines.join("\n") + "\n";
+}
 
 export function renderMetricsMarkdown(m: QualityMetrics): string {
   const lines: string[] = [];

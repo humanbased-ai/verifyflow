@@ -1,10 +1,12 @@
 import path from "node:path";
 import type {
+  CriteriaModel,
   CriterionResult,
   EvaluationPlan,
   HarnessResult,
   IssueContext,
   PlanStep,
+  PrContext,
   QualityEvent,
   RunReport,
   RunRequest,
@@ -25,6 +27,7 @@ import { CommandRunner } from "../harness/commandRunner.js";
 import { regenerateProbe } from "../harness/probeFix.js";
 import { looksLikeHarnessError } from "../util/harnessError.js";
 import { decideVerdict } from "./verdict/engine.js";
+import { writeVerdictInputs } from "./verdict/replay.js";
 import { writeReports, type WriteReportResult } from "./reporting/reporter.js";
 import { buildImprovementSignal, writeImprovementSignal } from "./reporting/improvementSignal.js";
 
@@ -53,14 +56,14 @@ export interface PipelineOutput {
   signalPath?: string;
 }
 
-export async function runVerification(
+/**
+ * Resolve the run context: load the PR (reference) and the Linear issue (source of truth),
+ * applying degraded no-ticket mode (IN-570). Shared by `runVerification` and `planRun`.
+ */
+async function resolveContext(
   req: RunRequest,
   deps: PipelineDeps,
-): Promise<PipelineOutput> {
-  const now = deps.clock ?? (() => new Date().toISOString());
-  const startedAt = now();
-
-  // --- Context: PR is reference, Linear issue is the source of truth -------------------
+): Promise<{ pr: PrContext; issue: IssueContext; degraded: boolean }> {
   const prRef: PrRef = parsePrRef(req.pullRequest);
   const pr = await deps.github.loadPr(prRef);
 
@@ -87,30 +90,40 @@ export async function runVerification(
         source: "pr-degraded",
       }
     : await deps.linear.loadIssue(issueKey!);
+  return { pr, issue, degraded };
+}
 
-  // --- Criteria (from the issue) ------------------------------------------------------
-  const criteria = await parseCriteria(issue, pr, deps.llm);
-
-  const runId = `${issue.key}_pr${pr.number}_${startedAt.replace(/[^0-9]/g, "").slice(0, 14)}`;
-  const runDir = path.join(req.outputRoot, "runs", runId);
-  const artifactRoot = path.join(runDir, "artifacts");
-
-  // --- Plan + real execution (level-specific) -----------------------------------------
-  let plan: EvaluationPlan;
-  const results: HarnessResult[] = [];
-  let repoConfigSource = "n/a";
-
+/**
+ * Build the evaluation plan for a level WITHOUT executing it. For ui level this also stamps the
+ * criteria with ui-check probes and returns the harness so execution can reuse it; for functional
+ * it returns the resolved repo config the execution loop needs. Pure planning — no subprocesses.
+ */
+async function buildEvaluationPlan(
+  req: RunRequest,
+  deps: PipelineDeps,
+  criteria: CriteriaModel,
+  pr: PrContext,
+  // The artifact root for an executing harness, or `undefined` for plan-only mode (`--dry-run`):
+  // no probes/tests run, so no execution harness is constructed and nothing touches the filesystem.
+  artifactRoot?: string,
+): Promise<{ plan: EvaluationPlan; repoConfigSource: string; ui?: UiHarness; cfg?: RepoConfig }> {
   if (req.level === "ui") {
     // UI level: browser-driven checks (IN-559). The browser is an execution backend behind the
     // UiHarness seam; until a real driver is wired the default reports checks as not executed.
-    const ui = deps.uiHarnessFactory?.(artifactRoot) ?? deps.uiHarness ?? new UnavailableUiHarness();
+    // In plan-only mode we never execute, so we must NOT construct a real driver — its constructor
+    // may have filesystem side effects (e.g. creating `<artifactRoot>/artifacts`).
+    const ui =
+      artifactRoot === undefined
+        ? undefined
+        : deps.uiHarnessFactory?.(artifactRoot) ?? deps.uiHarness ?? new UnavailableUiHarness();
+    const harnessName = ui?.name ?? deps.uiHarness?.name ?? "browser harness";
     // UI checks are judged by the browser (pass/fail), not by stdout. Replace any command-probe
     // a criterion picked up with a clean ui marker so the engine scores exit 0 = pass / 1 = fail
     // and never compares against a stdout substring meant for a CLI probe.
     for (const c of criteria.criteria) {
       if (c.observable) c.probe = { command: `ui-check: ${c.text}`, fromTicket: true };
     }
-    plan = {
+    const plan: EvaluationPlan = {
       level: "ui",
       steps: criteria.criteria
         .filter((c) => c.observable)
@@ -121,27 +134,87 @@ export async function runVerification(
           criterionIds: [c.id],
           reusedTestPoint: false,
         })),
-      notes: [`ui level: browser-driven checks via ${ui.name}`],
+      notes: [`ui level: browser-driven checks via ${harnessName}`],
     };
-    results.push(...(await runUiChecks(ui, criteria, req.baseUrl)));
-  } else {
-    const cfg = await loadRepoConfig(req.workdir);
-    repoConfigSource = cfg.source;
-    plan = await buildPlan(req.level, criteria, pr, cfg, deps.memory);
-    if (req.workdir) {
-      const runner = new CommandRunner(req.workdir, artifactRoot, { isolate: req.sandbox !== false });
-      for (const step of plan.steps) {
-        if (step.id.startsWith("probe-")) {
-          const criterionText = criteria.criteria.find((c) => c.id === step.criterionIds[0])?.text;
-          results.push(await runProbeWithSelfCheck(runner, step, criterionText, cfg, deps.llm));
-        } else {
-          results.push(await runner.runStep(step));
-        }
-        // Stop spending on probes/tests if environment setup failed hard.
-        if (step.id.startsWith("setup-")) {
-          const last = results[results.length - 1]!;
-          if (!last.executed || last.exitCode !== 0) break;
-        }
+    return { plan, repoConfigSource: "n/a", ui };
+  }
+  const cfg = await loadRepoConfig(req.workdir);
+  const plan = await buildPlan(req.level, criteria, pr, cfg, deps.memory);
+  return { plan, repoConfigSource: cfg.source, cfg };
+}
+
+export interface PlanPreview {
+  pr: PrContext;
+  issue: IssueContext;
+  criteria: CriteriaModel;
+  plan: EvaluationPlan;
+  degraded: boolean;
+}
+
+/**
+ * Resolve context + parse criteria + build the plan, and stop — `vf run --dry-run` (IN-625).
+ * Executes no probes/tests, performs no checkout, writes nothing. Lets a user inspect "how would
+ * VerifyFlow verify this?" for free before paying for a real run.
+ */
+export async function planRun(req: RunRequest, deps: PipelineDeps): Promise<PlanPreview> {
+  const { pr, issue, degraded } = await resolveContext(req, deps);
+  const criteria = await parseCriteria(issue, pr, deps.llm);
+  // Plan-only: no run dir, no artifact root — buildEvaluationPlan constructs no execution harness.
+  const { plan } = await buildEvaluationPlan(req, deps, criteria, pr);
+  return { pr, issue, criteria, plan, degraded };
+}
+
+export async function runVerification(
+  req: RunRequest,
+  deps: PipelineDeps,
+): Promise<PipelineOutput> {
+  const now = deps.clock ?? (() => new Date().toISOString());
+  const startedAt = now();
+
+  // --- Context: PR is reference, Linear issue is the source of truth -------------------
+  const { pr, issue, degraded } = await resolveContext(req, deps);
+
+  // --- Criteria (from the issue) ------------------------------------------------------
+  const criteria = await parseCriteria(issue, pr, deps.llm);
+
+  const runId = `${issue.key}_pr${pr.number}_${startedAt.replace(/[^0-9]/g, "").slice(0, 14)}`;
+  const runDir = path.join(req.outputRoot, "runs", runId);
+  const artifactRoot = path.join(runDir, "artifacts");
+
+  // --- Plan + real execution (level-specific) -----------------------------------------
+  const { plan, repoConfigSource, ui, cfg } = await buildEvaluationPlan(
+    req,
+    deps,
+    criteria,
+    pr,
+    artifactRoot,
+  );
+  const results: HarnessResult[] = [];
+
+  if (req.level === "ui") {
+    // buildEvaluationPlan always returns a defined `ui` for level=ui (it constructs the driver or
+    // an UnavailableUiHarness itself), so the non-null assertion is the real invariant here.
+    results.push(...(await runUiChecks(ui!, criteria, req.baseUrl)));
+  } else if (req.workdir) {
+    // buildEvaluationPlan always returns a cfg for non-UI levels today. Fail loudly rather than
+    // silently skipping execution if a future level ever omits it.
+    if (!cfg) {
+      throw new Error(
+        `internal: no repo config resolved for level "${req.level}"; cannot execute probes`,
+      );
+    }
+    const runner = new CommandRunner(req.workdir, artifactRoot, { isolate: req.sandbox !== false });
+    for (const step of plan.steps) {
+      if (step.id.startsWith("probe-")) {
+        const criterionText = criteria.criteria.find((c) => c.id === step.criterionIds[0])?.text;
+        results.push(await runProbeWithSelfCheck(runner, step, criterionText, cfg, deps.llm));
+      } else {
+        results.push(await runner.runStep(step));
+      }
+      // Stop spending on probes/tests if environment setup failed hard.
+      if (step.id.startsWith("setup-")) {
+        const last = results[results.length - 1]!;
+        if (!last.executed || last.exitCode !== 0) break;
       }
     }
   }
@@ -205,11 +278,18 @@ export async function runVerification(
   // --- Quality intelligence: persist memory + events (the "feed test points back" loop) -
   await persistMemoryAndEvents(req, deps, report, criteria, plan, results, component, finishedAt);
 
-  const reportPaths = await writeReports(report, runDir);
-
-  // Bounce-back (IN-554): emit a machine-consumable signal a coding agent can act on.
+  // Build the bounce-back signal (IN-554) up front — it is pure — so all three run-dir artifacts
+  // are written together. Issuing them concurrently means no single write is gated behind another
+  // succeeding, so a failure can't leave report.md present but verdict-inputs.json /
+  // improvement-signal.json missing (IN-625 review).
   const signal = buildImprovementSignal(report, criteria.criteria, results);
-  const signalPath = await writeImprovementSignal(signal, runDir);
+  const [reportPaths, , signalPath] = await Promise.all([
+    writeReports(report, runDir),
+    // Persist the verdict engine's inputs so `vf replay <runId>` can re-derive the verdict from
+    // stored evidence without re-executing any probe/test (IN-625).
+    writeVerdictInputs({ criteria, plan, results }, runDir),
+    writeImprovementSignal(signal, runDir),
+  ]);
 
   return { report, runDir, reportPaths, signalPath };
 }

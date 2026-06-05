@@ -25,20 +25,61 @@ export interface DoctorReport {
 export interface DoctorDeps {
   env?: NodeJS.ProcessEnv;
   hasBin?: (name: string) => Promise<boolean>;
+  /** Whether Playwright is importable (the ui-level browser backend). Injectable for tests. */
+  hasPlaywright?: () => Promise<boolean>;
+}
+
+/** Default Playwright probe: is the optional `playwright` module importable? */
+async function playwrightImportable(): Promise<boolean> {
+  try {
+    // Non-literal specifier so TS/bundlers don't require the optional dep to be installed.
+    const name = "playwright";
+    await import(name);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function runDoctor(deps: DoctorDeps = {}): Promise<DoctorReport> {
   const env = deps.env ?? process.env;
   const hasBin = deps.hasBin ?? hasBinary;
+  const hasPlaywright = deps.hasPlaywright ?? playwrightImportable;
 
-  const [gh, claude, uv] = await Promise.all([hasBin("gh"), hasBin("claude"), hasBin("uv")]);
+  const [gh, claude, uv, docker, podman, playwright] = await Promise.all([
+    hasBin("gh"),
+    hasBin("claude"),
+    hasBin("uv"),
+    hasBin("docker"),
+    hasBin("podman"),
+    hasPlaywright(),
+  ]);
   const linear = Boolean(env.LINEAR_API_KEY);
+  // Either container runtime satisfies the sandbox prerequisite (IN-555).
+  const sandbox = docker || podman;
+  const sandboxRuntime = docker ? "docker" : podman ? "podman" : null;
 
   const checks: DoctorCheck[] = [
     { name: "gh", ok: gh, required: true, detail: gh ? "found" : "not found on PATH — needed for GitHub PR context" },
     { name: "LINEAR_API_KEY", ok: linear, required: true, detail: linear ? "set" : "not set — needed for live Linear issue access (or use --fixtures)" },
     { name: "claude", ok: claude, required: false, detail: claude ? "found" : "not found — VerifyFlow falls back to the deterministic LLM backend" },
     { name: "uv", ok: uv, required: false, detail: uv ? "found" : "not found — only needed for python-uv target repos" },
+    {
+      name: "sandbox (docker/podman)",
+      ok: sandbox,
+      required: false,
+      detail: sandbox
+        ? `found (${sandboxRuntime}) — sandbox isolation for executing PR code (IN-555) available`
+        : "neither docker nor podman found — sandbox isolation (IN-555) unavailable; probes run on the host",
+    },
+    {
+      name: "playwright",
+      ok: playwright,
+      required: false,
+      detail: playwright
+        ? "installed — `--level ui` browser checks available"
+        : "not installed — needed for `--level ui`; install with `npm i -D playwright && npx playwright install chromium`",
+    },
   ];
   const ok = checks.every((c) => c.ok || !c.required);
   return { checks, ok };

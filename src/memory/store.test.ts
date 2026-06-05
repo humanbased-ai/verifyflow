@@ -54,3 +54,27 @@ test("no memory for an unknown repo", async () => {
   const store = await seeded();
   assert.equal(await store.matchTestPoint("other/repo", "anything at all here"), undefined);
 });
+
+test("clear(repo) removes only that repo's memory and reports its slug", async () => {
+  const store = await seeded();
+  const removed = await store.clear("acme/app");
+  assert.deepEqual(removed, ["acme_app"]);
+  assert.equal(await store.matchTestPoint("acme/app", "`sy --version` prints `Symphony <version>` and exits 0."), undefined);
+});
+
+test("clear(repo) on an unknown repo removes nothing", async () => {
+  const store = await seeded();
+  assert.deepEqual(await store.clear("nope/none"), []);
+});
+
+test("IN-625: clear(repo) refuses to escape the memory store (traversal guard)", async () => {
+  // A repo arg with a separator slugs to underscores today, so the resolved dir stays inside the
+  // store and clear() simply finds nothing — it must never delete outside <root>/memory.
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "vf-mem-trav-"));
+  // A sibling file outside the memory tree that must survive any clear().
+  const sentinel = path.join(root, "DO_NOT_DELETE");
+  await fs.writeFile(sentinel, "keep me");
+  const store = new MemoryStore(root);
+  await store.clear("../../DO_NOT_DELETE");
+  assert.equal(await fs.readFile(sentinel, "utf8"), "keep me", "clear() must not reach outside the store");
+});

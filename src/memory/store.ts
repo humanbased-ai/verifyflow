@@ -2,6 +2,10 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { CriterionResultValue, FailureCategory, Probe, TestPoint } from "../types.js";
 
+// Slug a repo string into a single safe path segment. Dots are kept on purpose — GitHub
+// owner/repo names legitimately contain them (e.g. `my.org/some.repo`). Path separators are not
+// in the allowlist, so any `/` (or other traversal punctuation) collapses to `_`, which keeps the
+// result a single directory name and neutralizes `../`-style traversal from a `--repo` argument.
 const slug = (repo: string) => repo.replace(/[^a-zA-Z0-9._-]+/g, "_");
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -44,7 +48,7 @@ export interface TestPointMatch {
   exact: boolean;
 }
 
-interface FailureModeRecord {
+export interface FailureModeRecord {
   category: FailureCategory;
   component: string;
   count: number;
@@ -149,6 +153,115 @@ export class MemoryStore {
       });
     }
     await fs.writeFile(file, JSON.stringify(points, null, 2) + "\n");
+  }
+
+  async loadFailureModes(repo: string): Promise<FailureModeRecord[]> {
+    try {
+      const raw = await fs.readFile(path.join(this.dir(repo), "failuremodes.json"), "utf8");
+      return JSON.parse(raw) as FailureModeRecord[];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * List the repos that have a memory directory on disk (IN-625, `vf memory ls`). The on-disk
+   * name is a slug of the repo, but every stored TestPoint carries its original `repo` string —
+   * we read that back so callers see `owner/name`, not the slug.
+   */
+  async listRepos(): Promise<Array<{ slug: string; repo: string; testPoints: number; failureModes: number }>> {
+    const memDir = path.join(this.root, "memory");
+    let entries: string[];
+    try {
+      entries = (await fs.readdir(memDir, { withFileTypes: true }))
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    } catch {
+      return [];
+    }
+    const out: Array<{ slug: string; repo: string; testPoints: number; failureModes: number }> = [];
+    for (const slugName of entries.sort()) {
+      const points = await this.loadTestPointsBySlug(slugName);
+      const failureModes = await this.loadFailureModesBySlug(slugName);
+      // Skip empty-but-present directories (e.g. an interrupted `clear` mid-write): they carry no
+      // test points to recover the original `owner/repo` string from, so listing them would show
+      // the hashed slug. Nothing to inspect there anyway.
+      if (points.length === 0 && failureModes.length === 0) continue;
+      out.push({
+        slug: slugName,
+        repo: points[0]?.repo ?? slugName,
+        testPoints: points.length,
+        failureModes: failureModes.length,
+      });
+    }
+    return out;
+  }
+
+  private async loadTestPointsBySlug(slugName: string): Promise<TestPoint[]> {
+    try {
+      const raw = await fs.readFile(path.join(this.root, "memory", slugName, "testpoints.json"), "utf8");
+      return JSON.parse(raw) as TestPoint[];
+    } catch {
+      return [];
+    }
+  }
+
+  private async loadFailureModesBySlug(slugName: string): Promise<FailureModeRecord[]> {
+    try {
+      const raw = await fs.readFile(path.join(this.root, "memory", slugName, "failuremodes.json"), "utf8");
+      return JSON.parse(raw) as FailureModeRecord[];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Find a single stored test point by its id, across all repos (IN-625, `vf memory show <key>`).
+   * O(repos × points): a sequential scan that reads every repo's test-point file. Fine for the
+   * typical memory size; revisit (e.g. an id→repo index) if the store ever grows large.
+   */
+  async findTestPoint(id: string): Promise<TestPoint | undefined> {
+    for (const r of await this.listRepos()) {
+      const points = await this.loadTestPointsBySlug(r.slug);
+      const hit = points.find((p) => p.id === id);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+
+  /**
+   * Clear the on-disk memory (IN-625, `vf memory clear`). With `repo`, only that repo's memory
+   * directory is removed; without it, the whole memory tree is wiped. Returns the repo slugs that
+   * were removed (empty when there was nothing to clear).
+   */
+  async clear(repo?: string): Promise<string[]> {
+    if (repo) {
+      const dir = this.dir(repo);
+      // Defence in depth: slug() already strips path separators, so traversal can't reach outside
+      // the store today — but assert that invariant explicitly so a future slug() change can't turn
+      // `clear()` into an arbitrary `rm`. The resolved dir must stay strictly inside <root>/memory.
+      const memRoot = path.join(this.root, "memory");
+      const rel = path.relative(memRoot, dir);
+      // Compare on path segments, not the raw string: a legitimate slug can begin with ".." (e.g.
+      // `.._.._x`) yet still resolve inside the store. Traversal means an upward `..` segment or an
+      // absolute path; the empty rel means `dir` IS the memory root (would wipe everything).
+      const escapes = rel === "" || rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+      if (escapes) {
+        throw new Error(`refusing to clear memory outside the store: ${repo}`);
+      }
+      // Single rm (no `force`, so ENOENT surfaces) instead of stat→rm — no TOCTOU window. A
+      // caught ENOENT means nothing was stored for this repo.
+      try {
+        await fs.rm(dir, { recursive: true });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw err;
+      }
+      return [slug(repo)];
+    }
+    const repos = (await this.listRepos()).map((r) => r.slug);
+    await fs.rm(path.join(this.root, "memory"), { recursive: true, force: true });
+    return repos;
   }
 
   async recordFailureMode(
