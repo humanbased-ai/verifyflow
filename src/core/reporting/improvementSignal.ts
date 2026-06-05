@@ -13,10 +13,15 @@ const SEVERITY: Record<string, ImprovementSeverity> = {
   fail: "must_fix",
   partial: "must_fix",
   blocked: "investigate",
-  not_evaluable: "needs_clarification",
 };
 
-/** A criterion result is actionable for bounce-back when it is anything other than a clean pass. */
+/**
+ * A criterion result is actionable for bounce-back when it names work a coding agent can do.
+ * `not_evaluable` is intentionally excluded (IN-628): "could not verify" is not a defect to fix —
+ * it only invites a clarification round, which fed the non-converging fix loop. Un-evaluable
+ * criteria already cap the run verdict at manual_review_required in the engine; they should not
+ * also be bounced back as fix-work.
+ */
 function isActionable(result: string): boolean {
   return result in SEVERITY;
 }
