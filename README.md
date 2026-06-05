@@ -35,6 +35,30 @@ It runs three ways:
 
 ---
 
+## Quickstart
+
+No clone, no build — run it straight from GitHub with `npx` (Node ≥ 20):
+
+```bash
+# 1. Check your environment is ready (gh / claude / LINEAR_API_KEY / playwright)
+npx github:humanbased-ai/verifyflow doctor
+
+# 2. Try it offline with bundled fixtures — zero credentials needed
+npx github:humanbased-ai/verifyflow run \
+  --fixtures fixtures/example-cli --linear EX-1 --pr example/greet#7 --level functional
+
+# 3. Verify a real PR (needs gh auth + LINEAR_API_KEY)
+npx github:humanbased-ai/verifyflow run \
+  --linear IN-123 --pr owner/repo#456 --level functional --checkout --comment
+```
+
+`npx` builds the CLI on first fetch (via the `prepare` script) and exposes the `vf` /
+`verifyflow` commands. Pin a version with `npx github:humanbased-ai/verifyflow#<tag>`.
+
+> Working in a clone instead? See [Local development](#local-development) below.
+
+---
+
 ## Prerequisites
 
 VerifyFlow stores **no secrets**. It reuses CLIs you have already installed and authorized:
@@ -51,9 +75,13 @@ VerifyFlow stores **no secrets**. It reuses CLIs you have already installed and 
 *Without `claude`, VerifyFlow falls back to a deterministic rules-only backend (reduced quality,
 never a hard failure). Offline runs can replace GitHub/Linear with fixtures (`--fixtures`).
 
+### Local development
+
+Working from a clone (contributors, or to run from source):
+
 ```bash
-npm install
-npm run build          # compile to dist/ (provides the vf / verifyflow bins)
+npm install            # also builds dist/ via the prepare script
+npm run build          # recompile dist/ after changes (provides the vf / verifyflow bins)
 # or run from source without building:
 npm run vf -- run --help
 ```
