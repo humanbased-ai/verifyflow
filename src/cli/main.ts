@@ -11,6 +11,7 @@ import type { LlmClient } from "../backends/llm.js";
 import { MemoryStore } from "../memory/store.js";
 import { EventLog } from "../memory/eventLog.js";
 import { ensurePrCheckout } from "../harness/checkout.js";
+import { inferPrRef, inGitRepo } from "./inferContext.js";
 import { loadRepoConfig } from "../core/planner/repoConfig.js";
 import { resolveAppSource, ghDeploymentLookup } from "../harness/ui/appSource.js";
 import { PlaywrightBrowserDriver } from "../harness/ui/browserDriver.js";
@@ -186,7 +187,10 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
   const pr = str(args.pr);
   const level = (str(args.level) ?? "functional") as Level;
   if (!pr) {
-    console.error("error: --pr is required\n");
+    console.error(
+      "error: no PR — pass --pr <url|owner/repo#N|#N>, or run inside a repo checkout on a branch " +
+        "with an open PR (VerifyFlow infers it via `gh pr view`).\n",
+    );
     console.error(USAGE);
     return 2;
   }
@@ -367,7 +371,35 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
   return { report, runDir, reportPaths, signalPath, prCommentPosted };
 }
 
+/**
+ * IN-678: fill omitted context from the current git checkout so `vf run` works with no flags.
+ * Additive — only fires when a flag is absent, and skips entirely in --fixtures (offline) mode.
+ * Mutates `args` in place. Applies to `vf run` (incl. --dry-run); never to `vf step` / `vf watch`.
+ */
+async function applyContextInference(args: Args): Promise<void> {
+  if (args.fixtures) return;
+  if (!(await inGitRepo())) return;
+
+  if (!str(args.pr)) {
+    const inferred = await inferPrRef();
+    if (inferred.ref) {
+      args.pr = inferred.ref;
+      console.error(`[verifyflow] inferred --pr from the current branch: ${inferred.ref}`);
+    } else if (inferred.reason) {
+      console.error(`[verifyflow] could not infer --pr: ${inferred.reason}`);
+    }
+  }
+
+  // Default execution to the current working tree when neither --workdir nor --checkout was given,
+  // so a zero-flag `vf run` actually executes against the repo you're standing in.
+  if (!str(args.workdir) && !args.checkout) {
+    args.workdir = ".";
+    console.error("[verifyflow] no --workdir/--checkout: verifying the current working tree (.)");
+  }
+}
+
 async function cmdRun(args: Args): Promise<number> {
+  await applyContextInference(args);
   if (args["dry-run"]) return cmdDryRun(args);
 
   const outcome = await executeRun(args);
@@ -424,7 +456,10 @@ async function cmdDryRun(args: Args): Promise<number> {
   const pr = str(args.pr);
   const level = (str(args.level) ?? "functional") as Level;
   if (!pr) {
-    console.error("error: --pr is required\n");
+    console.error(
+      "error: no PR — pass --pr <url|owner/repo#N|#N>, or run inside a repo checkout on a branch " +
+        "with an open PR (VerifyFlow infers it via `gh pr view`).\n",
+    );
     console.error(USAGE);
     return 2;
   }
