@@ -34,9 +34,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Detect existing release tags
+        id: tags
+        run: |
+          if git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -q .; then
+            echo "has_stable_tag=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_stable_tag=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Compute next version from conventional commits
         id: semver
-        if: inputs.exact_version == ''
+        if: |
+          inputs.exact_version == '' &&
+          (github.event_name == 'workflow_dispatch' || steps.tags.outputs.has_stable_tag == 'true')
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -55,6 +66,13 @@ jobs:
             echo "new_version=${{ inputs.exact_version }}" >> "$GITHUB_OUTPUT"
             echo "new_tag=v${{ inputs.exact_version }}" >> "$GITHUB_OUTPUT"
             echo "changelog=" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" != "workflow_dispatch" ] && [ "${{ steps.tags.outputs.has_stable_tag }}" != "true" ]; then
+            # First release must be manually seeded from package.json with exact_version (for
+            # example 0.1.0). Without a prior tag, github-tag-action starts from its own default
+            # initial version and could publish the wrong package version on the first merge.
+            echo "new_version=" >> "$GITHUB_OUTPUT"
+            echo "new_tag=" >> "$GITHUB_OUTPUT"
+            echo "changelog=" >> "$GITHUB_OUTPUT"
           else
             echo "new_version=${{ steps.semver.outputs.new_version }}" >> "$GITHUB_OUTPUT"
             echo "new_tag=${{ steps.semver.outputs.new_tag }}" >> "$GITHUB_OUTPUT"
@@ -68,7 +86,12 @@ jobs:
 
       - name: No release needed
         if: steps.ver.outputs.new_tag == ''
-        run: echo "No version-worthy commits since last tag - skipping publish."
+        run: |
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] && [ "${{ steps.tags.outputs.has_stable_tag }}" != "true" ]; then
+            echo "No stable v* tag exists yet - skipping automatic first publish. Run this workflow manually with exact_version."
+          else
+            echo "No version-worthy commits since last tag - skipping publish."
+          fi
 
   publish:
     name: Publish to npm
@@ -131,4 +154,3 @@ jobs:
           name: ${{ needs.compute.outputs.new_tag }}
           body: ${{ needs.compute.outputs.changelog }}
           generate_release_notes: true
-
