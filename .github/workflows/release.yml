@@ -47,7 +47,7 @@ jobs:
         id: semver
         if: |
           inputs.exact_version == '' &&
-          (github.event_name == 'workflow_dispatch' || steps.tags.outputs.has_stable_tag == 'true')
+          steps.tags.outputs.has_stable_tag == 'true'
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -60,13 +60,18 @@ jobs:
       - name: Resolve version
         id: ver
         env:
+          EXACT_VERSION: ${{ inputs.exact_version }}
           SEMVER_CHANGELOG: ${{ steps.semver.outputs.changelog }}
         run: |
-          if [ -n "${{ inputs.exact_version }}" ]; then
-            echo "new_version=${{ inputs.exact_version }}" >> "$GITHUB_OUTPUT"
-            echo "new_tag=v${{ inputs.exact_version }}" >> "$GITHUB_OUTPUT"
+          if [ -n "$EXACT_VERSION" ]; then
+            if ! printf '%s' "$EXACT_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "exact_version must be a stable semver version like 0.1.0" >&2
+              exit 1
+            fi
+            echo "new_version=$EXACT_VERSION" >> "$GITHUB_OUTPUT"
+            echo "new_tag=v$EXACT_VERSION" >> "$GITHUB_OUTPUT"
             echo "changelog=" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" != "workflow_dispatch" ] && [ "${{ steps.tags.outputs.has_stable_tag }}" != "true" ]; then
+          elif [ "${{ steps.tags.outputs.has_stable_tag }}" != "true" ]; then
             # First release must be manually seeded from package.json with exact_version (for
             # example 0.1.0). Without a prior tag, github-tag-action starts from its own default
             # initial version and could publish the wrong package version on the first merge.
@@ -87,8 +92,8 @@ jobs:
       - name: No release needed
         if: steps.ver.outputs.new_tag == ''
         run: |
-          if [ "${{ github.event_name }}" != "workflow_dispatch" ] && [ "${{ steps.tags.outputs.has_stable_tag }}" != "true" ]; then
-            echo "No stable v* tag exists yet - skipping automatic first publish. Run this workflow manually with exact_version."
+          if [ "${{ steps.tags.outputs.has_stable_tag }}" != "true" ]; then
+            echo "No stable v* tag exists yet - skipping first publish. Run this workflow manually from main with exact_version."
           else
             echo "No version-worthy commits since last tag - skipping publish."
           fi
@@ -120,33 +125,36 @@ jobs:
       - run: npm run build
 
       - name: Tag release
+        env:
+          RELEASE_VERSION: ${{ needs.compute.outputs.new_version }}
+          RELEASE_TAG: ${{ needs.compute.outputs.new_tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           CURRENT=$(node -p "require('./package.json').version")
-          if [ "$CURRENT" != "${{ needs.compute.outputs.new_version }}" ]; then
-            npm version "${{ needs.compute.outputs.new_version }}" --no-git-tag-version
+          if [ "$CURRENT" != "$RELEASE_VERSION" ]; then
+            npm version "$RELEASE_VERSION" --no-git-tag-version
             git add package.json package-lock.json
-            git commit -m "chore: release ${{ needs.compute.outputs.new_tag }}"
+            git commit -m "chore: release $RELEASE_TAG"
             git push origin HEAD:main
           fi
-          if git rev-parse "${{ needs.compute.outputs.new_tag }}" >/dev/null 2>&1; then
-            echo "Tag ${{ needs.compute.outputs.new_tag }} already exists - skipping."
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists - skipping."
           else
-            git tag "${{ needs.compute.outputs.new_tag }}"
-            git push origin "${{ needs.compute.outputs.new_tag }}"
+            git tag "$RELEASE_TAG"
+            git push origin "$RELEASE_TAG"
           fi
 
       - name: Publish to npm @latest
+        env:
+          RELEASE_VERSION: ${{ needs.compute.outputs.new_version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          VERSION="${{ needs.compute.outputs.new_version }}"
-          if npm view "@humanbased-ai/verifyflow@${VERSION}" version 2>/dev/null | grep -qF "${VERSION}"; then
-            echo "Version ${VERSION} already on npm - skipping publish."
+          if npm view "@humanbased-ai/verifyflow@${RELEASE_VERSION}" version 2>/dev/null | grep -qF "${RELEASE_VERSION}"; then
+            echo "Version ${RELEASE_VERSION} already on npm - skipping publish."
             exit 0
           fi
           npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
