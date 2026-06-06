@@ -45,9 +45,10 @@ Then store it in GitHub Actions:
 gh secret set NPM_TOKEN --repo humanbased-ai/verifyflow
 ```
 
-The stable release workflow stamps the package version in the runner, publishes to npm, and only
-then writes the release commit and pushes the `vX.Y.Z` tag. This keeps a missing, invalid, or
-mis-scoped npm token from leaving a release tag in the repo without a matching package on npm.
+The stable release workflow stamps the package version in the runner, prepares the release commit
+and tag locally, dry-runs the `main` and tag pushes, publishes to npm, and only then performs the
+real release commit/tag push. This keeps missing, invalid, or mis-scoped release credentials from
+leaving only one side of the release behind.
 
 ## Channels
 
