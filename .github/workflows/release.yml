@@ -124,6 +124,12 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      - name: Validate npm publish token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm whoami --registry=https://registry.npmjs.org/
+
       - name: Tag release
         env:
           RELEASE_VERSION: ${{ needs.compute.outputs.new_version }}
