@@ -33,6 +33,7 @@ import { readVerdictInputs, replayVerdict } from "../core/verdict/replay.js";
 import { buildStepSummary } from "./step.js";
 import { runInit } from "./init.js";
 import { runDoctor, renderDoctorReport } from "./doctor.js";
+import { runOnboard, renderOnboardReport } from "./onboard.js";
 import { memoryLs, memoryShow, memoryClear, isValidRepoArg } from "./memory.js";
 import { showRun, showSignal, isUnsafeRunId } from "./inspect.js";
 import {
@@ -70,6 +71,9 @@ Usage:
   vf init [--dir <path>]              Scaffold a verifyflow.config.json (default: current directory).
   vf doctor                           Check tools/env are ready (gh, claude, uv, LINEAR_API_KEY,
                                       docker/podman for sandbox, Playwright for --level ui).
+  vf onboard [--non-interactive]      Guided first-run setup: prints platform-specific fix commands
+                                      for any missing prerequisite, with an optional interactive
+                                      prompt for LINEAR_API_KEY. Stores no secrets.
   vf watch  --repo <owner/repo> [--auto-merge] [--interval <s>] [--level <l>]
                                       Independent daemon: watch the repo's Crosscheck-approved PRs,
                                       verify delivery, and (with --auto-merge) squash-merge on accept.
@@ -622,6 +626,32 @@ async function cmdDoctor(): Promise<number> {
   return report.ok ? 0 : 1;
 }
 
+/**
+ * `vf onboard` (#41): guided first-run setup. Runs the doctor checks and prints platform-specific
+ * fix commands for whatever's missing. Interactive in a TTY (offers to inline a pasted LINEAR key
+ * into the export command); falls back to a placeholder under --non-interactive or non-TTY.
+ */
+async function cmdOnboard(args: Args): Promise<number> {
+  const nonInteractive = !!args["non-interactive"] || !process.stdin.isTTY;
+  const prompt = nonInteractive
+    ? undefined
+    : async (q: string) => {
+        // Prompt goes to stderr so stdout stays reserved for the rendered report.
+        const rl = createInterface({ input: process.stdin, output: process.stderr });
+        try {
+          return await rl.question(q);
+        } catch {
+          return "";
+        } finally {
+          rl.close();
+        }
+      };
+  const report = await runOnboard({ prompt });
+  console.log(renderOnboardReport(report));
+  // Exit 1 when a required step remains so CI / scripted bootstraps surface the failure.
+  return report.ready ? 0 : 1;
+}
+
 /** `vf memory ls|show <key>|clear [--repo ...] [--yes]` (IN-625): inspect/prune reusable memory. */
 async function cmdMemory(args: Args, positionals: string[]): Promise<number> {
   const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
@@ -863,6 +893,7 @@ async function main(): Promise<number> {
   if (cmd === "signal") return cmdSignal(args, positionals);
   if (cmd === "init") return cmdInit(args);
   if (cmd === "doctor") return cmdDoctor();
+  if (cmd === "onboard") return cmdOnboard(args);
   if (cmd === "watch") return cmdWatch(args);
   console.error(`error: unknown command "${cmd}"\n`);
   console.log(USAGE);
