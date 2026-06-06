@@ -92,6 +92,10 @@ export function renderDoctorReport(report: DoctorReport): string {
     return `  [${mark}] ${c.name}: ${c.detail}`;
   });
   lines.push("");
-  lines.push(report.ok ? "doctor: all required tools are ready." : "doctor: missing required tools (see FAIL above).");
+  lines.push(
+    report.ok
+      ? "doctor: all required tools are ready."
+      : "doctor: missing required tools (see FAIL above). Run `vf onboard` for a guided fix.",
+  );
   return lines.join("\n");
 }
