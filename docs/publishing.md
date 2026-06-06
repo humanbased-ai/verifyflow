@@ -46,10 +46,14 @@ GitHub environments:
 After `NPM_TOKEN` is configured, run the `Release` workflow manually with `exact_version` set to
 the desired first version, for example `0.1.0`.
 
+Automatic `main` push releases are disabled until a stable `vX.Y.Z` tag exists. This prevents the
+first merge after adding the workflow from publishing a default initial version instead of the
+package's intended `0.1.0` seed. After the manual first publish creates `v0.1.0`, subsequent pushes
+to `main` can publish by conventional commit detection.
+
 Then verify:
 
 ```bash
 npm view @humanbased-ai/verifyflow version
 npx @humanbased-ai/verifyflow doctor
 ```
-
