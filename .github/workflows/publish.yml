@@ -34,8 +34,18 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      - name: Detect existing release tags
+        id: tags
+        run: |
+          if git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -q .; then
+            echo "has_stable_tag=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_stable_tag=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Compute next stable version (dry run)
         id: next_ver
+        if: steps.tags.outputs.has_stable_tag == 'true'
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -50,7 +60,9 @@ jobs:
         id: stamp
         run: |
           NEXT="${{ steps.next_ver.outputs.new_version }}"
-          if [ -z "$NEXT" ]; then
+          if [ "${{ steps.tags.outputs.has_stable_tag }}" != "true" ]; then
+            NEXT=$(node -p "require('./package.json').version.replace(/-.*$/, '')")
+          elif [ -z "$NEXT" ]; then
             CURRENT=$(node -p "require('./package.json').version.replace(/-.*$/, '')")
             IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
             NEXT="${MAJ}.${MIN}.$((PAT + 1))"
@@ -99,8 +111,18 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      - name: Detect existing release tags
+        id: tags
+        run: |
+          if git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -q .; then
+            echo "has_stable_tag=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_stable_tag=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Compute next stable version (dry run)
         id: next_ver
+        if: steps.tags.outputs.has_stable_tag == 'true'
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -115,7 +137,9 @@ jobs:
         id: stamp
         run: |
           NEXT="${{ steps.next_ver.outputs.new_version }}"
-          if [ -z "$NEXT" ]; then
+          if [ "${{ steps.tags.outputs.has_stable_tag }}" != "true" ]; then
+            NEXT=$(node -p "require('./package.json').version.replace(/-.*$/, '')")
+          elif [ -z "$NEXT" ]; then
             CURRENT=$(node -p "require('./package.json').version.replace(/-.*$/, '')")
             IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
             NEXT="${MAJ}.${MIN}.$((PAT + 1))"
@@ -140,4 +164,3 @@ jobs:
           npm publish --tag alpha --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
