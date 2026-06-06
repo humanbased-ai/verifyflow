@@ -24,6 +24,7 @@ import { parsePrRef } from "./context/github.js";
 import { type LinearClient, linearKeyFromPr } from "./context/linear.js";
 import { parseCriteria } from "./criteria/parser.js";
 import { buildPlan } from "./planner/planner.js";
+import { selectLevel } from "./planner/selectLevel.js";
 import { loadRepoConfig, type RepoConfig } from "./planner/repoConfig.js";
 import { CommandRunner } from "../harness/commandRunner.js";
 import { regenerateProbe } from "../harness/probeFix.js";
@@ -199,8 +200,11 @@ export interface PlanPreview {
 export async function planRun(req: RunRequest, deps: PipelineDeps): Promise<PlanPreview> {
   const { pr, issue, degraded } = await resolveContext(req, deps);
   const criteria = await parseCriteria(issue, pr, deps.llm);
+  const sel = req.autoSelect ? selectLevel(criteria, pr, req.autoSelect) : undefined;
+  const eff = sel ? { ...req, level: sel.level } : req;
   // Plan-only: no run dir, no artifact root — buildEvaluationPlan constructs no execution harness.
-  const { plan } = await buildEvaluationPlan(req, deps, criteria, pr);
+  const { plan } = await buildEvaluationPlan(eff, deps, criteria, pr);
+  if (sel) plan.notes.unshift(...sel.notes);
   return { pr, issue, criteria, plan, degraded };
 }
 
@@ -217,29 +221,34 @@ export async function runVerification(
   // --- Criteria (from the issue) ------------------------------------------------------
   const criteria = await parseCriteria(issue, pr, deps.llm);
 
+  // --- Auto level (IN-680): resolve `--level auto` now that the criteria exist ---------
+  const sel = req.autoSelect ? selectLevel(criteria, pr, req.autoSelect) : undefined;
+  const eff = sel ? { ...req, level: sel.level } : req;
+
   const runId = `${issue.key}_pr${pr.number}_${startedAt.replace(/[^0-9]/g, "").slice(0, 14)}`;
   const runDir = path.join(req.outputRoot, "runs", runId);
   const artifactRoot = path.join(runDir, "artifacts");
 
   // --- Plan + real execution (level-specific) -----------------------------------------
   const { plan, repoConfigSource, ui, journey, cfg } = await buildEvaluationPlan(
-    req,
+    eff,
     deps,
     criteria,
     pr,
     artifactRoot,
   );
+  if (sel) plan.notes.unshift(...sel.notes);
   const results: HarnessResult[] = [];
 
-  if (req.level === "journey") {
+  if (eff.level === "journey") {
     // buildEvaluationPlan always returns a defined `journey` for level=journey (it constructs the
     // executor or an UnavailableJourneyHarness itself), so the non-null assertion is the invariant.
-    results.push(...(await runJourneyChecks(journey!, criteria, req.baseUrl)));
-  } else if (req.level === "ui") {
+    results.push(...(await runJourneyChecks(journey!, criteria, eff.baseUrl)));
+  } else if (eff.level === "ui") {
     // buildEvaluationPlan always returns a defined `ui` for level=ui (it constructs the driver or
     // an UnavailableUiHarness itself), so the non-null assertion is the real invariant here.
-    results.push(...(await runUiChecks(ui!, criteria, req.baseUrl)));
-  } else if (req.workdir) {
+    results.push(...(await runUiChecks(ui!, criteria, eff.baseUrl)));
+  } else if (eff.workdir) {
     // buildEvaluationPlan always returns a cfg for non-UI levels today. Fail loudly rather than
     // silently skipping execution if a future level ever omits it.
     if (!cfg) {
@@ -247,7 +256,7 @@ export async function runVerification(
         `internal: no repo config resolved for level "${req.level}"; cannot execute probes`,
       );
     }
-    const runner = new CommandRunner(req.workdir, artifactRoot, { isolate: req.sandbox !== false });
+    const runner = new CommandRunner(eff.workdir, artifactRoot, { isolate: eff.sandbox !== false });
     for (const step of plan.steps) {
       if (step.id.startsWith("probe-")) {
         const criterionText = criteria.criteria.find((c) => c.id === step.criterionIds[0])?.text;
@@ -295,7 +304,7 @@ export async function runVerification(
       repo: pr.repo,
       prNumber: pr.number,
       commitSha,
-      level: req.level,
+      level: eff.level,
       backend: req.backend ?? deps.llm.name,
       policy: req.policy,
     },
@@ -320,7 +329,7 @@ export async function runVerification(
   };
 
   // --- Quality intelligence: persist memory + events (the "feed test points back" loop) -
-  await persistMemoryAndEvents(req, deps, report, criteria, plan, results, component, finishedAt);
+  await persistMemoryAndEvents(eff, deps, report, criteria, plan, results, component, finishedAt);
 
   // Build the bounce-back signal (IN-554) up front — it is pure — so all three run-dir artifacts
   // are written together. Issuing them concurrently means no single write is gated behind another

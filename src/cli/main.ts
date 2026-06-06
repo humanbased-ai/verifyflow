@@ -46,7 +46,7 @@ import {
 const USAGE = `verifyflow — evidence-backed delivery verification
 
 Usage:
-  vf run    --linear <KEY|url> --pr <url|owner/repo#N|#N> --level <functional|ui|journey> [options]
+  vf run    --linear <KEY|url> --pr <url|owner/repo#N|#N> --level <functional|ui|journey|auto> [options]
                                       Add --dry-run to print the resolved criteria + planned probes
                                       without executing anything (no checkout, exits 0).
   vf step   --pr <url> [options]      Orchestrator-facing step (Symphony, IN-569): advisory-only,
@@ -82,8 +82,9 @@ Options:
   --linear <KEY|url>     Linear issue (PRIMARY source of acceptance criteria).
                          If omitted, VerifyFlow derives it from the PR body's Linear link.
   --pr <ref>             GitHub PR URL, owner/repo#N, or #N.
-  --level <level>        functional | ui (AI-driven browser) | journey (multi-step end-to-end;
-                         seam ready, executor lands in Phase 2 — criteria block until then).
+  --level <level>        functional | ui (AI-driven browser) | journey (multi-step end-to-end) |
+                         auto (pick the level from the ticket's criteria; downgrade to functional
+                         if the environment can't run a browser level, and say why).
   --base-url <url>       Base URL of the running app for ui-level browser checks. If omitted,
                          VerifyFlow tries to discover a deployment preview from the PR's checks.
   --ui-auth <file>       Playwright storageState JSON (cookies/localStorage) for an authenticated
@@ -185,7 +186,7 @@ interface RunOutcome {
  */
 async function executeRun(args: Args): Promise<RunOutcome | number> {
   const pr = str(args.pr);
-  const level = (str(args.level) ?? "functional") as Level;
+  const level = (str(args.level) ?? "functional") as Level | "auto";
   if (!pr) {
     console.error(
       "error: no PR — pass --pr <url|owner/repo#N|#N>, or run inside a repo checkout on a branch " +
@@ -194,8 +195,8 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     console.error(USAGE);
     return 2;
   }
-  if (level !== "functional" && level !== "ui" && level !== "journey") {
-    console.error(`error: unknown level "${level}" (functional, ui, journey).`);
+  if (level !== "functional" && level !== "ui" && level !== "journey" && level !== "auto") {
+    console.error(`error: unknown level "${level}" (functional, ui, journey, auto).`);
     return 2;
   }
 
@@ -236,7 +237,10 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
   let uiHarnessFactory: ((artifactRoot: string) => UiHarness) | undefined;
   let journeyHarnessFactory: ((artifactRoot: string) => JourneyHarness) | undefined;
   let appCleanup: (() => Promise<void>) | undefined;
-  if ((level === "ui" || level === "journey") && !fixtures) {
+  // Environment readiness for the browser-backed levels — also feeds `--level auto` selection.
+  let appReady = false;
+  let playwrightAvailable = false;
+  if ((level === "ui" || level === "journey" || level === "auto") && !fixtures) {
     const prCtx = await github.loadPr(parsePrRef(pr));
     const repoConfig = await loadRepoConfig(workdir ? path.resolve(workdir) : undefined);
     const source = await resolveAppSource({
@@ -249,6 +253,7 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     if (source.kind === "ready") {
       resolvedBaseUrl = source.baseUrl;
       appCleanup = source.cleanup;
+      appReady = true;
       console.error(`[verifyflow] ${level} app source: ${source.source} → ${source.baseUrl}`);
     } else {
       console.error(`[verifyflow] ${level}: ${source.reason} — browser steps will be environment-blocked.`);
@@ -256,6 +261,7 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
 
     const driver = new PlaywrightBrowserDriver();
     const browserOk = await driver.available();
+    playwrightAvailable = browserOk;
     if (!browserOk) {
       console.error(
         "[verifyflow] " + level + ": Playwright not installed — install with " +
@@ -263,16 +269,17 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
       );
     }
     const auth = str(args["ui-auth"]);
-    if (level === "ui") {
-      if (browserOk) {
-        uiHarnessFactory = (artifactRoot) =>
-          new AgenticUiHarness({ driver, llm, artifactsDir: artifactRoot, storageStatePath: auth });
-      }
-    } else {
+    // For `auto` we prepare BOTH harnesses; the pipeline picks the level from the criteria and uses
+    // only the matching one. For an explicit level we prepare just that one.
+    if ((level === "ui" || level === "auto") && browserOk) {
+      uiHarnessFactory = (artifactRoot) =>
+        new AgenticUiHarness({ driver, llm, artifactsDir: artifactRoot, storageStatePath: auth });
+    }
+    if (level === "journey" || level === "auto") {
       // journey: backend steps run shell commands in the checkout (if any); browser steps use the
       // driver (if installed). With neither, the harness has no capability → criteria block.
       const resolvedWorkdir = workdir ? path.resolve(workdir) : undefined;
-      if (!resolvedWorkdir) {
+      if (!resolvedWorkdir && level === "journey") {
         console.error(
           "[verifyflow] journey: no --workdir/--checkout — backend steps will be blocked (browser steps only).",
         );
@@ -306,7 +313,9 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
   const request: RunRequest = {
     linearIssue: str(args.linear) ?? "",
     pullRequest: pr,
-    level,
+    // `auto` is resolved inside the pipeline once criteria exist; carry a functional placeholder.
+    level: level === "auto" ? "functional" : level,
+    autoSelect: level === "auto" ? { appAvailable: appReady, playwrightAvailable } : undefined,
     policy,
     backend: str(args.backend),
     outputRoot,
@@ -454,7 +463,7 @@ function renderPlanPreview(p: PlanPreview): string {
 /** `vf run --dry-run` (IN-625): resolve criteria + build the plan, print it, run nothing. */
 async function cmdDryRun(args: Args): Promise<number> {
   const pr = str(args.pr);
-  const level = (str(args.level) ?? "functional") as Level;
+  const level = (str(args.level) ?? "functional") as Level | "auto";
   if (!pr) {
     console.error(
       "error: no PR — pass --pr <url|owner/repo#N|#N>, or run inside a repo checkout on a branch " +
@@ -465,8 +474,8 @@ async function cmdDryRun(args: Args): Promise<number> {
   }
   // Mirror executeRun's guard: accept the known levels (journey is seam-only until Phase 2 —
   // its criteria block rather than execute), reject anything else.
-  if (level !== "functional" && level !== "ui" && level !== "journey") {
-    console.error(`error: unknown level "${level}" (functional, ui, journey).`);
+  if (level !== "functional" && level !== "ui" && level !== "journey" && level !== "auto") {
+    console.error(`error: unknown level "${level}" (functional, ui, journey, auto).`);
     return 2;
   }
   const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
@@ -477,7 +486,11 @@ async function cmdDryRun(args: Args): Promise<number> {
   const request: RunRequest = {
     linearIssue: str(args.linear) ?? "",
     pullRequest: pr,
-    level,
+    // `auto` is resolved inside planRun from the criteria; carry a functional placeholder. In dry
+    // run we assume the browser env is ready so the preview shows the level the TICKET needs — it
+    // executes nothing, so a locally missing browser/app shouldn't mask the intended level.
+    level: level === "auto" ? "functional" : level,
+    autoSelect: level === "auto" ? { appAvailable: true, playwrightAvailable: true } : undefined,
     policy: "advisory",
     outputRoot,
     workdir: str(args.workdir) ? path.resolve(str(args.workdir)!) : undefined,

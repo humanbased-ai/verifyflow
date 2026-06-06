@@ -92,6 +92,13 @@ export interface RunRequest {
    * is capped at manual_review_required and the report is stamped accordingly.
    */
   allowNoTicket?: boolean;
+  /**
+   * `--level auto` (IN-680): when set, the pipeline resolves the concrete level itself from the
+   * parsed criteria (functional/ui/journey), downgrading from a browser level when this
+   * environment can't run it. `level` then carries only the placeholder the CLI started from —
+   * the resolved level wins for planning, execution, and the report.
+   */
+  autoSelect?: { appAvailable: boolean; playwrightAvailable: boolean };
   /** Where artifacts, reports, events and memory are written. */
   outputRoot: string;
 }
