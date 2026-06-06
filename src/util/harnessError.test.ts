@@ -6,6 +6,7 @@ import { looksLikeHarnessError } from "./harnessError.js";
 test("classic signatures still match", () => {
   for (const s of [
     "sh: vf: command not found",
+    "sh: 1: definitely-not-a-real-binary-zzz: not found",
     "No module named pytest",
     "error: unrecognized arguments: --foo",
     "usage: pytest [options]",

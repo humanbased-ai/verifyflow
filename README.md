@@ -26,16 +26,32 @@ VerifyFlow is the last gate in the HumanBased delivery chain:
 Symphony (orchestration)  →  Crosscheck (code review, merge-readiness)  →  VerifyFlow (delivery verification)
 ```
 
+Symphony is the current orchestration layer. It is expected to be refactored into **Jazzband**,
+an open JavaScript implementation of the same workflow idea. VerifyFlow should remain useful
+before and after that refactor: it talks through GitHub PR metadata, Linear issues, CLI JSON, and
+evidence files rather than through Symphony internals.
+
 It runs three ways:
 
 - **Standalone** — `vf run …` for manual validation and debugging.
 - **Orchestrated step** — `vf step …`, the advisory adapter Symphony invokes after Crosscheck
   (auto-resolves the Linear issue, executes, comments back on the PR, prints one JSON line).
-- **Library** — the pipeline (`src/core/pipeline.ts`) behind both commands.
+- **Watcher** — `vf watch …`, an independent daemon that watches Crosscheck-approved PR heads
+  and verifies them once per SHA.
+- **Library** — the pipeline (`src/core/pipeline.ts`) behind the commands.
 
 ---
 
-## Quickstart
+## Install
+
+When published to npm:
+
+```bash
+npm install -g @humanbased-ai/verifyflow
+vf doctor
+```
+
+Until the first npm release is published, run directly from GitHub:
 
 No clone, no build — run it straight from GitHub with `npx` (Node ≥ 20):
 
@@ -56,6 +72,46 @@ npx github:humanbased-ai/verifyflow run \
 `verifyflow` commands. Pin a version with `npx github:humanbased-ai/verifyflow#<tag>`.
 
 > Working in a clone instead? See [Local development](#local-development) below.
+
+---
+
+## What it can do today
+
+- Verify one Linear issue against one GitHub PR.
+- Use the Linear issue as the source of acceptance criteria.
+- Infer the linked Linear issue from PR body or branch name when possible.
+- Run `functional`, `ui`, `journey`, or `auto` evaluation.
+- Execute real commands/tests against a checkout or existing workdir.
+- Drive a browser with Playwright for UI and browser-backed journey checks.
+- Capture command logs, test output, screenshots, browser traces, markdown reports, JSON reports,
+  quality events, and reusable test-point memory.
+- Post/update an idempotent PR comment with the delivery report.
+- Optionally post a Linear comment with the verdict.
+- Run standalone (`vf run`), as an orchestrated step (`vf step`), or as a watcher (`vf watch`).
+- Stay conservative: uncertainty becomes `blocked` or `not_evaluable`, not a false product fail.
+
+## Planned next
+
+- Project-level verification: read a Linear project, map tickets to PRs, run leveled verification
+  per ticket, and publish one end-to-end project report.
+- A formal coordination contract for Symphony, Crosscheck, and VerifyFlow with separate configs,
+  logs, state, and SHA-bound PR annotations.
+- Stronger sandbox isolation for untrusted PR execution: container filesystem boundaries and
+  network egress controls, beyond the current secret-stripping environment isolation.
+- Live Linear status transitions behind explicit flags.
+- Operation video capture for UI/journey runs.
+- Opt-in Linear issue filing for recurring systemic quality patterns.
+
+## Out of current scope
+
+- Code review and merge-readiness. That belongs to Crosscheck.
+- Ticket decomposition and coding-agent dispatch. That belongs to Symphony today and Jazzband in
+  the planned open JavaScript implementation.
+- Moving money, sending production emails, or performing irreversible side effects during
+  verification. Use dry-run/smoke-test fixtures and sandbox data.
+- Mobile-native evaluation, multi-agent backend benchmarking, dashboards, and long-term artifact
+  object storage. These are useful adjacent areas, but not required for the current VerifyFlow
+  contract.
 
 ---
 
@@ -131,14 +187,14 @@ GitHub checks. See [docs/ui-level.md](docs/ui-level.md).
 ### `vf run` — standalone verification
 
 ```
-vf run --linear <KEY|url> --pr <url|owner/repo#N|#N> --level <functional|ui> [options]
+vf run --linear <KEY|url> --pr <url|owner/repo#N|#N> --level <functional|ui|journey|auto> [options]
 ```
 
 | Option | Meaning |
 | --- | --- |
 | `--linear <KEY\|url>` | Linear issue — the **primary** acceptance-criteria source. If omitted, derived from the PR body's Linear link. |
 | `--pr <ref>` | GitHub PR URL, `owner/repo#N`, or `#N` (with `--workdir`/repo context). |
-| `--level <level>` | `functional` or `ui`. `journey` is not implemented yet. |
+| `--level <level>` | `functional`, `ui`, `journey`, or `auto`. |
 | `--base-url <url>` | Running app URL for `ui` checks (else preview auto-discovery). |
 | `--ui-auth <file>` | Playwright `storageState` JSON for an authenticated `ui` session. |
 | `--checkout` | Clone the repo and check out the PR head for real execution. |
@@ -164,6 +220,16 @@ vf step --pr <url> [--crosscheck-verdict <v>] [--no-comment]
 Advisory-only: defaults to live checkout + PR comment, auto-resolves the Linear issue from the
 PR body or branch name, runs verification, and prints exactly one machine-readable JSON line to
 stdout for the orchestrator. Exits `0` whenever verification completed (never gates).
+
+### `vf watch` — independent Crosscheck-approved PR watcher
+
+```
+vf watch --repo <owner/repo> [--auto-merge] [--interval <seconds>] [--level <level>]
+```
+
+Watches open PRs, waits for the newest Crosscheck comment to approve the current head SHA, runs
+VerifyFlow once per head, and optionally squash-merges only on `accept`. This keeps VerifyFlow
+usable without Symphony/Jazzband while still interoperating with Crosscheck.
 
 ### `vf report` — quality-intelligence metrics
 
@@ -246,7 +312,7 @@ unreproduced failure all map to `blocked`, never a false `fail`.
 context (Linear issue + GitHub PR)
   → parse acceptance criteria
   → plan (level-aware; reuse remembered test points)
-  → execute (command runner for functional · AI browser for ui)
+  → execute (command runner for functional · AI browser for ui · multi-step executor for journey)
   → collect evidence (command output, test reports, screenshots)
   → verdict engine (separates product failure / harness failure / environment / ambiguity)
   → report (markdown + JSON) + idempotent PR comment + optional Linear write-back
@@ -278,9 +344,11 @@ memory.
 - [prd.md](prd.md) — product requirements
 - [architecture.md](architecture.md) — system architecture
 - [docs/evaluation-levels.md](docs/evaluation-levels.md) — `functional` / `ui` / `journey`
+- [docs/end-to-end-auto-evaluation.md](docs/end-to-end-auto-evaluation.md) — long-term project-level report design
 - [docs/evidence-schema.md](docs/evidence-schema.md) — evidence & verdict contract
 - [docs/ui-level.md](docs/ui-level.md) — AI-driven UI verification
 - [docs/symphony-integration.md](docs/symphony-integration.md) — wiring VerifyFlow into Symphony
+- [docs/publishing.md](docs/publishing.md) — npm publishing and release workflow
 - [docs/quality-intelligence.md](docs/quality-intelligence.md) — metrics & pattern detection
 
 ---

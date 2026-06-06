@@ -9,6 +9,7 @@
  */
 export const HARNESS_ERROR_SIGNATURES: RegExp[] = [
   /\bcommand not found\b/i,
+  /^\S*sh:\s*\d+:\s*.+:\s*not found\b/im,
   /\bno such file or directory\b/i,
   /\bfailed to spawn\b/i,
   /\bunrecognized arguments\b/i,

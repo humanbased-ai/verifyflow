@@ -1,4 +1,4 @@
-# VerifyFlow agent — implementation (functional MVP)
+# VerifyFlow agent — implementation
 
 This is the first runnable implementation of the agent defined in `prd.md` / `architecture.md`.
 It is a **delivery verification agent**: it judges whether a PR delivers the intent + acceptance
@@ -16,7 +16,8 @@ criteria of its linked **Linear issue**. It does **not** review code quality / h
 - **Records everything**: per-run `report.md` + `report.json`, `artifacts/*.log` evidence, and an
   append-only `events.jsonl` quality-intelligence log.
 
-Levels: `functional` only for now (`ui`/`journey` are rejected with a clear message).
+Levels: `functional`, `ui`, and `journey` are implemented. `auto` selects the level from the
+ticket and available environment.
 
 ## Pipeline (maps 1:1 to architecture.md)
 
@@ -102,7 +103,7 @@ src/
     verdict/           evidence-grounded verdict engine
     reporting/         markdown + json + PR comment
     pipeline.ts        orchestration
-  harness/             real command execution + PR checkout
+  harness/             command, UI, journey execution + PR checkout
   backends/            LLM backend boundary (claude CLI + deterministic fallback)
   memory/              reusable test points + failure modes + JSONL events
 fixtures/              recorded issue/PR for offline runs
@@ -115,7 +116,8 @@ examples/example-target  tiny real target used by the hermetic e2e test
 executes against `examples/example-target` (no network, no Python, no claude) and asserts the
 verdict, evidence, event log, and the memory reuse (feed-back) loop.
 
-## Not yet (next PRs)
+## Planned next
 
-`ui` (Playwright) and `journey` levels; native Crosscheck/Jazzband adapters; object storage for
-artifacts; trend dashboards; auto-filing Linear tickets for recurring failure patterns.
+Project-level Linear verification; native Crosscheck/Jazzband adapters; stronger sandbox
+isolation; object storage for artifacts; operation videos; trend dashboards; auto-filing Linear
+tickets for recurring failure patterns.

@@ -1,7 +1,7 @@
 # Symphony integration surface (IN-562 discovery)
 
 How Symphony invokes a post-Crosscheck step, and where VerifyFlow plugs in.
-Investigated against `humanbased-ai/symphony` and `Motivation-Labs/crosscheck` (2026-06-03).
+Investigated against `humanbased-ai/symphony` and `humanbased-ai/crosscheck` (2026-06-03).
 
 ## TL;DR
 

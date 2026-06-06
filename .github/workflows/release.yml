@@ -1,0 +1,165 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Force a specific version bump'
+        required: false
+        default: ''
+        type: string
+      exact_version:
+        description: 'Publish an exact version, for example 0.1.0'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  compute:
+    name: Compute version
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      !startsWith(github.event.head_commit.message, 'chore: release')
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.ver.outputs.new_version }}
+      new_tag: ${{ steps.ver.outputs.new_tag }}
+      changelog: ${{ steps.ver.outputs.changelog }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref_name }}
+
+      - name: Detect existing release tags
+        id: tags
+        run: |
+          if git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | grep -q .; then
+            echo "has_stable_tag=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_stable_tag=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next version from conventional commits
+        id: semver
+        if: |
+          inputs.exact_version == '' &&
+          steps.tags.outputs.has_stable_tag == 'true'
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          dry_run: true
+          default_bump: ${{ inputs.bump || 'patch' }}
+          major_string_token: 'BREAKING CHANGE'
+          minor_string_token: 'feat'
+          patch_string_token: 'fix,perf,refactor'
+
+      - name: Resolve version
+        id: ver
+        env:
+          EXACT_VERSION: ${{ inputs.exact_version }}
+          SEMVER_CHANGELOG: ${{ steps.semver.outputs.changelog }}
+        run: |
+          if [ -n "$EXACT_VERSION" ]; then
+            if ! printf '%s' "$EXACT_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "exact_version must be a stable semver version like 0.1.0" >&2
+              exit 1
+            fi
+            echo "new_version=$EXACT_VERSION" >> "$GITHUB_OUTPUT"
+            echo "new_tag=v$EXACT_VERSION" >> "$GITHUB_OUTPUT"
+            echo "changelog=" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.tags.outputs.has_stable_tag }}" != "true" ]; then
+            # First release must be manually seeded from package.json with exact_version (for
+            # example 0.1.0). Without a prior tag, github-tag-action starts from its own default
+            # initial version and could publish the wrong package version on the first merge.
+            echo "new_version=" >> "$GITHUB_OUTPUT"
+            echo "new_tag=" >> "$GITHUB_OUTPUT"
+            echo "changelog=" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_version=${{ steps.semver.outputs.new_version }}" >> "$GITHUB_OUTPUT"
+            echo "new_tag=${{ steps.semver.outputs.new_tag }}" >> "$GITHUB_OUTPUT"
+            EOF_DELIM=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+            {
+              echo "changelog<<$EOF_DELIM"
+              echo "$SEMVER_CHANGELOG"
+              echo "$EOF_DELIM"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: No release needed
+        if: steps.ver.outputs.new_tag == ''
+        run: |
+          if [ "${{ steps.tags.outputs.has_stable_tag }}" != "true" ]; then
+            echo "No stable v* tag exists yet - skipping first publish. Run this workflow manually from main with exact_version."
+          else
+            echo "No version-worthy commits since last tag - skipping publish."
+          fi
+
+  publish:
+    name: Publish to npm
+    needs: compute
+    if: needs.compute.outputs.new_tag != ''
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref_name }}
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Tag release
+        env:
+          RELEASE_VERSION: ${{ needs.compute.outputs.new_version }}
+          RELEASE_TAG: ${{ needs.compute.outputs.new_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "$CURRENT" != "$RELEASE_VERSION" ]; then
+            npm version "$RELEASE_VERSION" --no-git-tag-version
+            git add package.json package-lock.json
+            git commit -m "chore: release $RELEASE_TAG"
+            git push origin HEAD:main
+          fi
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists - skipping."
+          else
+            git tag "$RELEASE_TAG"
+            git push origin "$RELEASE_TAG"
+          fi
+
+      - name: Publish to npm @latest
+        env:
+          RELEASE_VERSION: ${{ needs.compute.outputs.new_version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if npm view "@humanbased-ai/verifyflow@${RELEASE_VERSION}" version 2>/dev/null | grep -qF "${RELEASE_VERSION}"; then
+            echo "Version ${RELEASE_VERSION} already on npm - skipping publish."
+            exit 0
+          fi
+          npm publish --access public --provenance
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.compute.outputs.new_tag }}
+          name: ${{ needs.compute.outputs.new_tag }}
+          body: ${{ needs.compute.outputs.changelog }}
+          generate_release_notes: true
