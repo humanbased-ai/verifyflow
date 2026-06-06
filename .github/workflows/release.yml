@@ -130,25 +130,13 @@ jobs:
         run: |
           npm whoami --registry=https://registry.npmjs.org/
 
-      - name: Tag release
+      - name: Stamp release version
         env:
           RELEASE_VERSION: ${{ needs.compute.outputs.new_version }}
-          RELEASE_TAG: ${{ needs.compute.outputs.new_tag }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           CURRENT=$(node -p "require('./package.json').version")
           if [ "$CURRENT" != "$RELEASE_VERSION" ]; then
             npm version "$RELEASE_VERSION" --no-git-tag-version
-            git add package.json package-lock.json
-            git commit -m "chore: release $RELEASE_TAG"
-            git push origin HEAD:main
-          fi
-          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Tag $RELEASE_TAG already exists - skipping."
-          else
-            git tag "$RELEASE_TAG"
-            git push origin "$RELEASE_TAG"
           fi
 
       - name: Publish to npm @latest
@@ -161,6 +149,24 @@ jobs:
             exit 0
           fi
           npm publish --access public --provenance
+
+      - name: Commit and tag release
+        env:
+          RELEASE_TAG: ${{ needs.compute.outputs.new_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- package.json package-lock.json; then
+            git add package.json package-lock.json
+            git commit -m "chore: release $RELEASE_TAG"
+            git push origin HEAD:main
+          fi
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists - skipping."
+          else
+            git tag "$RELEASE_TAG"
+            git push origin "$RELEASE_TAG"
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
