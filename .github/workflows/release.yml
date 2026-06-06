@@ -16,6 +16,10 @@ on:
         default: ''
         type: string
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   compute:
     name: Compute version
@@ -124,25 +128,40 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      - name: Tag release
+      - name: Validate npm publish token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm whoami --registry=https://registry.npmjs.org/
+
+      - name: Stamp release version
         env:
           RELEASE_VERSION: ${{ needs.compute.outputs.new_version }}
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "$CURRENT" != "$RELEASE_VERSION" ]; then
+            npm version "$RELEASE_VERSION" --no-git-tag-version
+          fi
+
+      - name: Prepare release tag
+        env:
           RELEASE_TAG: ${{ needs.compute.outputs.new_tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          CURRENT=$(node -p "require('./package.json').version")
-          if [ "$CURRENT" != "$RELEASE_VERSION" ]; then
-            npm version "$RELEASE_VERSION" --no-git-tag-version
-            git add package.json package-lock.json
-            git commit -m "chore: release $RELEASE_TAG"
-            git push origin HEAD:main
-          fi
-          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Tag $RELEASE_TAG already exists - skipping."
-          else
+          if ! git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
             git tag "$RELEASE_TAG"
-            git push origin "$RELEASE_TAG"
+          fi
+
+      - name: Preflight release tag push
+        env:
+          RELEASE_TAG: ${{ needs.compute.outputs.new_tag }}
+        run: |
+          git fetch origin --tags
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists remotely."
+          else
+            git push --dry-run origin "$RELEASE_TAG"
           fi
 
       - name: Publish to npm @latest
@@ -155,6 +174,21 @@ jobs:
             exit 0
           fi
           npm publish --access public --provenance
+
+      - name: Push release tag
+        env:
+          RELEASE_TAG: ${{ needs.compute.outputs.new_tag }}
+        run: |
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+              echo "Tag $RELEASE_TAG already exists remotely - skipping."
+            else
+              git push origin "$RELEASE_TAG"
+            fi
+          else
+            echo "Local tag $RELEASE_TAG is missing after preflight." >&2
+            exit 1
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
