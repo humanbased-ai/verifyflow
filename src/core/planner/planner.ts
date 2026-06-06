@@ -8,9 +8,9 @@ import type {
 import type { MemoryStore } from "../../memory/store.js";
 import { adaptCommand, type RepoConfig } from "./repoConfig.js";
 
-const UI_HINTS =
+export const UI_HINTS =
   /\b(click|button|screen|page|render|displays?|visible|browser|UI|form|toast|modal|navigat)/i;
-const HIGH_RISK_HINTS =
+export const HIGH_RISK_HINTS =
   /\b(billing|payment|charge|auth|permission|migrat|webhook|integration|checkout|onboarding)/i;
 
 /**
