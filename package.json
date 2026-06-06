@@ -23,7 +23,7 @@
     "build": "tsc -p tsconfig.json",
     "prepare": "tsc -p tsconfig.json",
     "vf": "tsx src/cli/main.ts",
-    "test": "node --import tsx --test $(find src -name '*.test.ts' -print)",
+    "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
