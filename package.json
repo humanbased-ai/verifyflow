@@ -1,5 +1,5 @@
 {
-  "name": "verifyflow",
+  "name": "@humanbased-ai/verifyflow",
   "version": "0.1.0",
   "description": "Evidence-backed delivery verification agent: does a PR deliver its linked Linear issue?",
   "type": "module",
@@ -12,6 +12,11 @@
   },
   "files": [
     "dist",
+    "docs",
+    "examples",
+    "fixtures",
+    "architecture.md",
+    "prd.md",
     "README.md"
   ],
   "scripts": {
@@ -19,8 +24,30 @@
     "prepare": "tsc -p tsconfig.json",
     "vf": "tsx src/cli/main.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
+  "keywords": [
+    "delivery-verification",
+    "acceptance-criteria",
+    "linear",
+    "github",
+    "pull-request",
+    "playwright",
+    "ai",
+    "automation",
+    "cli"
+  ],
+  "homepage": "https://github.com/humanbased-ai/verifyflow#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/humanbased-ai/verifyflow.git"
+  },
+  "bugs": {
+    "url": "https://github.com/humanbased-ai/verifyflow/issues"
+  },
+  "author": "HumanBased AI",
+  "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.14.0",
     "tsx": "^4.16.0",

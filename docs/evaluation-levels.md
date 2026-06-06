@@ -100,3 +100,11 @@ Examples:
 - requested `ui`, but downstream effects are the actual ticket outcome
 
 Escalation should be explicit in the report and should not silently change merge-gate policy unless configured.
+
+## Project-level auto evaluation
+
+Today, these levels apply to one ticket and one PR. The planned project-level layer will apply the
+same levels across a Linear project: map tickets to PRs, select the appropriate level for each
+ticket, run the checks, then aggregate a coverage matrix and end-to-end readiness report.
+
+See [end-to-end-auto-evaluation.md](end-to-end-auto-evaluation.md).

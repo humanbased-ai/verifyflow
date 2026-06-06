@@ -1,12 +1,17 @@
-# Running VerifyFlow in the Symphony → Crosscheck → VerifyFlow pipeline
+# Running VerifyFlow in the Symphony/Jazzband → Crosscheck → VerifyFlow pipeline
 
 Phase-1 setup (IN-569): VerifyFlow runs as an **advisory** step after Crosscheck approves a
 PR. It really executes the PR (checkout → probes → evidence), keeps the report + artifacts,
 and comments the report back on the PR. It never merges, never blocks, never transitions
 Linear state.
 
+Symphony is the current orchestrator. The orchestration layer is expected to be refactored into
+**Jazzband**, an open JavaScript implementation. VerifyFlow should not depend on private
+Symphony/Jazzband state; it should consume public PR metadata, Crosscheck verdict annotations,
+and explicit CLI JSON contracts.
+
 ```
-Symphony (orchestrator) ──dispatch──▶ coding agent ──▶ PR
+Symphony/Jazzband (orchestrator) ──dispatch──▶ coding agent ──▶ PR
         │                                              │
         │                    Crosscheck (webhook) reviews ──▶ verdict comment
         │                                              │

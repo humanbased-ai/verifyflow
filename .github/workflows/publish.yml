@@ -1,0 +1,143 @@
+name: Publish
+
+# Prerelease channels:
+#   staging branch -> @beta
+#   alpha branch   -> @alpha
+# Stable @latest releases are handled by release.yml on main.
+
+on:
+  push:
+    branches: [staging, alpha]
+  workflow_dispatch:
+
+jobs:
+  staging:
+    name: Publish @beta
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Compute next stable version (dry run)
+        id: next_ver
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          dry_run: true
+          default_bump: patch
+          major_string_token: 'BREAKING CHANGE'
+          minor_string_token: 'feat'
+          patch_string_token: 'fix,perf,refactor'
+          release_branches: staging
+
+      - name: Stamp prerelease version
+        id: stamp
+        run: |
+          NEXT="${{ steps.next_ver.outputs.new_version }}"
+          if [ -z "$NEXT" ]; then
+            CURRENT=$(node -p "require('./package.json').version.replace(/-.*$/, '')")
+            IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
+            NEXT="${MAJ}.${MIN}.$((PAT + 1))"
+          fi
+          LAST_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -1)
+          if [ -n "$LAST_TAG" ]; then
+            COUNT=$(git rev-list --count "${LAST_TAG}..HEAD")
+          else
+            COUNT=$(git rev-list --count HEAD)
+          fi
+          VERSION="${NEXT}-beta.${COUNT}"
+          npm version "$VERSION" --no-git-tag-version
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to npm @beta
+        run: |
+          VERSION="${{ steps.stamp.outputs.version }}"
+          if npm view "@humanbased-ai/verifyflow@${VERSION}" version 2>/dev/null | grep -qF "${VERSION}"; then
+            echo "Version ${VERSION} already on npm - skipping publish."
+            exit 0
+          fi
+          npm publish --tag beta --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  alpha:
+    name: Publish @alpha
+    if: github.ref == 'refs/heads/alpha'
+    runs-on: ubuntu-latest
+    environment: alpha
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Compute next stable version (dry run)
+        id: next_ver
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          dry_run: true
+          default_bump: patch
+          major_string_token: 'BREAKING CHANGE'
+          minor_string_token: 'feat'
+          patch_string_token: 'fix,perf,refactor'
+          release_branches: alpha
+
+      - name: Stamp prerelease version
+        id: stamp
+        run: |
+          NEXT="${{ steps.next_ver.outputs.new_version }}"
+          if [ -z "$NEXT" ]; then
+            CURRENT=$(node -p "require('./package.json').version.replace(/-.*$/, '')")
+            IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
+            NEXT="${MAJ}.${MIN}.$((PAT + 1))"
+          fi
+          LAST_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -1)
+          if [ -n "$LAST_TAG" ]; then
+            COUNT=$(git rev-list --count "${LAST_TAG}..HEAD")
+          else
+            COUNT=$(git rev-list --count HEAD)
+          fi
+          VERSION="${NEXT}-alpha.${COUNT}"
+          npm version "$VERSION" --no-git-tag-version
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to npm @alpha
+        run: |
+          VERSION="${{ steps.stamp.outputs.version }}"
+          if npm view "@humanbased-ai/verifyflow@${VERSION}" version 2>/dev/null | grep -qF "${VERSION}"; then
+            echo "Version ${VERSION} already on npm - skipping publish."
+            exit 0
+          fi
+          npm publish --tag alpha --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+

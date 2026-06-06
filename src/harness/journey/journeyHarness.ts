@@ -51,7 +51,7 @@ export function toHarnessResult(r: JourneyCheckResult): HarnessResult {
   };
 }
 
-/** Production default: no journey executor wired yet. Reports not-executed so criteria block, never pass. */
+/** Production fallback when this run has no usable journey executor. Blocks criteria, never passes. */
 export class UnavailableJourneyHarness implements JourneyHarness {
   readonly name = "journey-unavailable";
   async available(): Promise<boolean> {
@@ -63,8 +63,9 @@ export class UnavailableJourneyHarness implements JourneyHarness {
       passed: false,
       executed: false,
       detail:
-        "No journey executor is wired yet (the multi-step orchestrator is an IN-661 / Phase 2 " +
-        "follow-up). This criterion needs end-to-end, cross-step evaluation and cannot be verified here.",
+        "No journey executor is available for this run (provide --checkout/--workdir and, for " +
+        "browser steps, Playwright/base URL). This criterion needs end-to-end, cross-step " +
+        "evaluation and cannot be verified here.",
       evidence: [],
     };
   }

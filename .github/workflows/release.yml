@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Force a specific version bump'
+        required: false
+        default: ''
+        type: choice
+        options: ['', patch, minor, major]
+      exact_version:
+        description: 'Publish an exact version, for example 0.1.0'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  compute:
+    name: Compute version
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      !startsWith(github.event.head_commit.message, 'chore: release')
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.ver.outputs.new_version }}
+      new_tag: ${{ steps.ver.outputs.new_tag }}
+      changelog: ${{ steps.ver.outputs.changelog }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version from conventional commits
+        id: semver
+        if: inputs.exact_version == ''
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          dry_run: true
+          default_bump: ${{ inputs.bump || 'patch' }}
+          major_string_token: 'BREAKING CHANGE'
+          minor_string_token: 'feat'
+          patch_string_token: 'fix,perf,refactor'
+
+      - name: Resolve version
+        id: ver
+        env:
+          SEMVER_CHANGELOG: ${{ steps.semver.outputs.changelog }}
+        run: |
+          if [ -n "${{ inputs.exact_version }}" ]; then
+            echo "new_version=${{ inputs.exact_version }}" >> "$GITHUB_OUTPUT"
+            echo "new_tag=v${{ inputs.exact_version }}" >> "$GITHUB_OUTPUT"
+            echo "changelog=" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_version=${{ steps.semver.outputs.new_version }}" >> "$GITHUB_OUTPUT"
+            echo "new_tag=${{ steps.semver.outputs.new_tag }}" >> "$GITHUB_OUTPUT"
+            EOF_DELIM=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+            {
+              echo "changelog<<$EOF_DELIM"
+              echo "$SEMVER_CHANGELOG"
+              echo "$EOF_DELIM"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: No release needed
+        if: steps.ver.outputs.new_tag == ''
+        run: echo "No version-worthy commits since last tag - skipping publish."
+
+  publish:
+    name: Publish to npm
+    needs: compute
+    if: needs.compute.outputs.new_tag != ''
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "$CURRENT" != "${{ needs.compute.outputs.new_version }}" ]; then
+            npm version "${{ needs.compute.outputs.new_version }}" --no-git-tag-version
+            git add package.json package-lock.json
+            git commit -m "chore: release ${{ needs.compute.outputs.new_tag }}"
+            git push origin HEAD:main
+          fi
+          if git rev-parse "${{ needs.compute.outputs.new_tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ needs.compute.outputs.new_tag }} already exists - skipping."
+          else
+            git tag "${{ needs.compute.outputs.new_tag }}"
+            git push origin "${{ needs.compute.outputs.new_tag }}"
+          fi
+
+      - name: Publish to npm @latest
+        run: |
+          VERSION="${{ needs.compute.outputs.new_version }}"
+          if npm view "@humanbased-ai/verifyflow@${VERSION}" version 2>/dev/null | grep -qF "${VERSION}"; then
+            echo "Version ${VERSION} already on npm - skipping publish."
+            exit 0
+          fi
+          npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.compute.outputs.new_tag }}
+          name: ${{ needs.compute.outputs.new_tag }}
+          body: ${{ needs.compute.outputs.changelog }}
+          generate_release_notes: true
+
