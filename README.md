@@ -221,7 +221,7 @@ Missing **required** tools exit non-zero; optional ones only warn.
 | --- | --- | --- |
 | `functional` | Does the capability work? (API, logic, data, auth, tests) | **Implemented** — real checkout + execution + evidence. |
 | `ui` | Can a user use it? (browser flow, visible states) | **Implemented** — AI agent drives a real browser (Playwright); conservative verdicts. |
-| `journey` | Does the whole product outcome work? (upstream→downstream) | **Not yet implemented.** |
+| `journey` | Does the whole product outcome work? (upstream→downstream) | **Implemented** — agentic multi-modal executor (backend shell steps + browser); async/downstream poll + variation/regression guidance. |
 
 ---
 
@@ -287,7 +287,8 @@ memory.
 
 ## Status
 
-Functional-level verification is implemented and validated end-to-end against a live target
-(checkout → `uv sync` → real test execution → evidence → verdict → PR comment). The `ui` level is
-implemented with an AI-driven Playwright backend. `journey` level and a few robustness items
-(sandbox isolation, local-serve auto-start) are in progress — see the VerifyFlow project in Linear.
+All three verification levels (`functional`, `ui`, `journey`) are implemented and validated
+end-to-end. `functional` runs real checkout + test execution; `ui` drives a real browser via an
+AI-powered Playwright agent; `journey` runs an agentic multi-modal executor (backend shell steps +
+browser) with async/downstream poll support. A few robustness items remain in progress (full
+container sandbox isolation, local-serve auto-start) — see the VerifyFlow project in Linear.
