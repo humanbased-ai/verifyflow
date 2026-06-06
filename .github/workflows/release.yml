@@ -143,32 +143,21 @@ jobs:
             npm version "$RELEASE_VERSION" --no-git-tag-version
           fi
 
-      - name: Prepare release commit and tag
+      - name: Prepare release tag
         env:
           RELEASE_TAG: ${{ needs.compute.outputs.new_tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- package.json package-lock.json; then
-            git add package.json package-lock.json
-            git commit -m "chore: release $RELEASE_TAG"
-          fi
           if ! git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
             git tag "$RELEASE_TAG"
           fi
 
-      - name: Preflight release git writes
+      - name: Preflight release tag push
         env:
           RELEASE_TAG: ${{ needs.compute.outputs.new_tag }}
         run: |
-          git fetch origin main --tags
-          REMOTE_MAIN=$(git rev-parse origin/main)
-          BASE=$(git merge-base HEAD origin/main)
-          if [ "$REMOTE_MAIN" != "$BASE" ]; then
-            echo "main advanced before release publish; rerun the workflow from the latest main." >&2
-            exit 1
-          fi
-          git push --dry-run origin HEAD:main
+          git fetch origin --tags
           if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             echo "Tag $RELEASE_TAG already exists remotely."
           else
@@ -186,11 +175,10 @@ jobs:
           fi
           npm publish --access public --provenance
 
-      - name: Push release commit and tag
+      - name: Push release tag
         env:
           RELEASE_TAG: ${{ needs.compute.outputs.new_tag }}
         run: |
-          git push origin HEAD:main
           if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
             if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
               echo "Tag $RELEASE_TAG already exists remotely - skipping."
