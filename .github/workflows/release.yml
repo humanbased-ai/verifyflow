@@ -9,8 +9,7 @@ on:
         description: 'Force a specific version bump'
         required: false
         default: ''
-        type: choice
-        options: ['', patch, minor, major]
+        type: string
       exact_version:
         description: 'Publish an exact version, for example 0.1.0'
         required: false
