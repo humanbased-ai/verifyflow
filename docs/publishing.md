@@ -24,7 +24,7 @@ vf --help
 The release workflows expect:
 
 - `NPM_TOKEN` with publish permission for `@humanbased-ai/verifyflow`
-- `RELEASE_TOKEN` with permission to push release commits/tags to `main`
+- `RELEASE_TOKEN` with permission to push release tags and create GitHub releases
 - optional `MAIL_USERNAME` and `MAIL_PASSWORD` if email release notifications are enabled later
 
 GitHub environments:
@@ -45,10 +45,10 @@ Then store it in GitHub Actions:
 gh secret set NPM_TOKEN --repo humanbased-ai/verifyflow
 ```
 
-The stable release workflow stamps the package version in the runner, prepares the release commit
-and tag locally, dry-runs the `main` and tag pushes, publishes to npm, and only then performs the
-real release commit/tag push. This keeps missing, invalid, or mis-scoped release credentials from
-leaving only one side of the release behind.
+The stable release workflow stamps the package version in the runner and publishes that stamped
+workspace; it does not write version-bump commits to `main`. It prepares and dry-runs the release
+tag before publishing, then pushes the `vX.Y.Z` tag after npm accepts the package. The tag is the
+GitHub-side release marker.
 
 ## Channels
 
