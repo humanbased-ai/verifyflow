@@ -8,6 +8,8 @@ export interface LlmRequest {
   prompt: string;
   /** A label used only for logs. */
   task: string;
+  /** Routing hint. "fast" uses a cheaper/faster model; "smart" (default) uses the full model. */
+  tier?: "fast" | "smart";
 }
 
 export interface LlmClient {

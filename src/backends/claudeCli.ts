@@ -13,11 +13,15 @@ export class ClaudeCliClient implements LlmClient {
   readonly name = "claude-cli";
   private readonly bin: string;
   private readonly model?: string;
+  private readonly fastModel: string;
+  private readonly smartModel: string;
   private readonly timeoutMs: number;
 
-  constructor(opts: { bin?: string; model?: string; timeoutMs?: number } = {}) {
+  constructor(opts: { bin?: string; model?: string; fastModel?: string; smartModel?: string; timeoutMs?: number } = {}) {
     this.bin = opts.bin ?? "claude";
-    this.model = opts.model;
+    this.model = opts.model; // explicit override — wins over tier
+    this.fastModel = opts.fastModel ?? "claude-haiku-4-5-20251001";
+    this.smartModel = opts.smartModel ?? "claude-sonnet-4-6";
     this.timeoutMs = opts.timeoutMs ?? 120_000;
   }
 
@@ -26,8 +30,9 @@ export class ClaudeCliClient implements LlmClient {
   }
 
   async complete(req: LlmRequest): Promise<string> {
+    const model = this.model ?? (req.tier === "fast" ? this.fastModel : this.smartModel);
     const args = ["-p", req.prompt, "--output-format", "json"];
-    if (this.model) args.push("--model", this.model);
+    args.push("--model", model);
     if (req.system) args.push("--append-system-prompt", req.system);
 
     const res = await run(this.bin, args, { timeoutMs: this.timeoutMs });

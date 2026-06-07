@@ -356,7 +356,7 @@ async function reviewSubstringMisses(
       "Actual output:",
       out.slice(0, 1500),
     ].join("\n");
-    const raw = await llm.complete({ system, prompt, task: "substring-semantic-review" });
+    const raw = await llm.complete({ system, prompt, task: "substring-semantic-review", tier: "fast" });
     const parsed = extractJson<{ satisfied?: boolean; reason?: string }>(raw);
     if (parsed.satisfied === true) {
       r.result = "pass";
@@ -448,7 +448,7 @@ async function applyLlmJudgment(
     return true;
   };
 
-  const raw = await llm.complete({ system, prompt, task: "verdict-review" });
+  const raw = await llm.complete({ system, prompt, task: "verdict-review", tier: "smart" });
   const parsed = extractJson<{ adjustments?: LlmVerdictAdj[] }>(raw);
   for (const adj of parsed.adjustments ?? []) {
     const r = results.find((x) => x.criterionId === adj.id);

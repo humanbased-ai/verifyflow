@@ -221,7 +221,7 @@ async function enrichWithLlm(
     "Respond with JSON: {criteria:[{id,method,observable,probe,notes}], implicit:[{text,method,probe,notes}], ticketQualityIssues:[]}",
   ].join("\n");
 
-  const raw = await llm.complete({ system, prompt, task: "criteria-enrich" });
+  const raw = await llm.complete({ system, prompt, task: "criteria-enrich", tier: "fast" });
   const parsed = extractJson<LlmEnrichResponse>(raw);
 
   const byId = new Map(criteria.map((c) => [c.id, c]));
