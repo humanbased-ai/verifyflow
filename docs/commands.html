@@ -343,7 +343,41 @@
   <div class="hero">
     <h1>命令参考</h1>
     <p>自动验证 PR 是否真正交付了 Linear ticket 里的需求，生成可追溯证据，贴回 GitHub PR comment。</p>
-    <div class="badge">npm link → vf &lt;command&gt;</div>
+    <div class="badge">git clone &amp;&amp; npm install &amp;&amp; npm link</div>
+  </div>
+
+  <!-- 环境准备 -->
+  <div class="section">
+    <div class="section-title">环境准备（首次执行一次）</div>
+    <p class="scenario-note" style="margin-left:0;margin-bottom:12px;">
+      下面所有例子用的是 <span class="inline-code">vf &lt;command&gt;</span>。要让这条命令直接可用，先按 <b>方式 A</b> 把 <span class="inline-code">vf</span> 软链到全局 PATH；或者一直加 <span class="inline-code">npm run vf --</span> 前缀（<b>方式 B</b>，不需要 link）。
+    </p>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">git clone git@github.com:humanbased-ai/verifyflow.git &amp;&amp; cd verifyflow <span class="cmd-comment"># 拉仓库</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">npm install <span class="cmd-comment"># prepare 钩子会自动跑 tsc，生成 dist/</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text"><span class="cmd-comment"># 方式 A · 推荐：把 vf 装到全局 PATH，下面例子原样可跑</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">npm link <span class="cmd-comment"># 之后任意目录 `vf doctor` / `vf run` 都能用</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text"><span class="cmd-comment"># 方式 B · 不 link：把例子里的 `vf X` 改成 `npm run vf -- X`</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">npm run vf -- doctor <span class="cmd-comment"># 等价于 `vf doctor`，只在 verifyflow 目录内可用</span></div>
+      </div>
+    </div>
   </div>
 
   <!-- 工作流 -->
