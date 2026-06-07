@@ -330,69 +330,6 @@
       border-top: 1px solid #21262d;
     }
 
-    .pre-block {
-      background: #0d1117;
-      border: 1px solid #21262d;
-      border-radius: 8px;
-      padding: 14px 16px;
-      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-      font-size: 12.5px;
-      color: #e6edf3;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      margin: 8px 0;
-    }
-
-    .pre-block .c  { color: #484f58; }
-    .pre-block .k  { color: #79c0ff; }
-    .pre-block .s  { color: #a5d6ff; }
-    .pre-block .g  { color: #3fb950; }
-    .pre-block .r  { color: #f85149; }
-    .pre-block .o  { color: #d29922; }
-
-    .case-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-
-    @media (max-width: 760px) {
-      .case-grid { grid-template-columns: 1fr; }
-    }
-
-    .case-card {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 10px;
-      padding: 16px 18px;
-    }
-
-    .case-card.bad  { border-color: #5a1a1a; }
-    .case-card.good { border-color: #1b4332; }
-
-    .case-card h3 {
-      font-size: 14px;
-      color: #f0f6fc;
-      margin-bottom: 4px;
-    }
-
-    .case-card .head {
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 8px;
-    }
-
-    .case-card.bad  .head { color: #f85149; }
-    .case-card.good .head { color: #3fb950; }
-
-    .case-card p {
-      font-size: 13px;
-      color: #8b949e;
-      margin: 6px 0;
-    }
-
     .callout {
       background: #161b22;
       border: 1px solid #30363d;
@@ -624,78 +561,95 @@
     </div>
   </div>
 
-  <!-- 实跑案例 -->
+  <!-- 实跑命令清单 -->
   <div class="section">
-    <div class="section-title">实跑案例 — PR #60 / IN-737（端到端实测）</div>
-    <p class="scenario-note" style="margin-left:0; margin-bottom:12px;">
-      给 verifyflow 自己加 <span class="inline-code">--version</span> 标志，Linear issue 写了 3 条带可执行命令的 AC，跑两次：第一次踩了 Windows shell 的坑（已修），第二次拿到 accept。这是真实输出，不是示意。
+    <div class="section-title">完整命令清单 — 拿 PR #60 / IN-737 练手</div>
+    <p class="scenario-note" style="margin-left:0; margin-bottom:14px;">
+      给 verifyflow 自己加 <span class="inline-code">--version</span> 的 dogfood 用例（<a href="https://linear.app/inductive-network/issue/IN-737/verifyflow-test-add-vf-version-flag" style="color:#58a6ff;">IN-737</a> + <a href="https://github.com/humanbased-ai/verifyflow/pull/60" style="color:#58a6ff;">PR #60</a>）。
+      下面这些命令克隆 verifyflow + <code>npm install + npm link</code> 之后**原样可跑**。每条注释说明它和上一条的差别在哪。
     </p>
 
-    <div class="case-grid">
-
-      <div class="case-card bad">
-        <div class="head">❌ 第一次跑（修 bug 前）</div>
-        <h3>setup 步骤挂在 spawn sh ENOENT</h3>
-        <p>Windows PowerShell 没有 sh，setup 直接挂，3 个 probe 一个都没跑到，verdict 自动降级为 <code>manual_review_required</code>。</p>
-        <div class="pre-block"><span class="g">$</span> vf run --pr humanbased-ai/verifyflow#60 --checkout
-
-[verifyflow] checking out humanbased-ai/verifyflow#60@70f1a79 ...
-[verifyflow] extracted 3 acceptance criteria
-[verifyflow] running: environment setup: npm ci || npm install
-[verifyflow] verdict: <span class="o">manual_review_required</span>
-
-  AC-1   <span class="o">⊘ blocked</span>      0.50  `npm run vf -- --version` ...
-  AC-2   <span class="o">⊘ blocked</span>      0.50  The short form `npm run vf -- -v` ...
-  AC-3   <span class="o">⊘ blocked</span>      0.50  Existing behavior is preserved ...
-
-  Verdict: <span class="o">manual_review_required</span>   (0 pass, 3 blocked/not_evaluable)</div>
-        <p style="margin-top:10px;">看 <code>artifacts/setup-1.log</code>：</p>
-        <div class="pre-block"><span class="c">$ npm ci || npm install
-(exit: null, executed: false, <span class="r">spawnError: spawn sh ENOENT</span>)</span></div>
+    <p class="scenario-note" style="margin-left:0; margin-top:18px; margin-bottom:6px; color:#58a6ff; text-transform:uppercase; letter-spacing:0.08em; font-size:11px; font-weight:600;">① 一次性准备</p>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf onboard <span class="cmd-comment"># 粘 Linear key，自动写到 ~/.verifyflow/credentials.json</span></div>
       </div>
-
-      <div class="case-card good">
-        <div class="head">✅ 第二次跑（修完之后）</div>
-        <h3>3 个 probe 实际执行 → accept</h3>
-        <p>commandRunner 改用 <code>shell: true</code>（POSIX 走 /bin/sh，Windows 走 cmd.exe），setup 通过，probe 全跑，verdict = <code>accept</code>。</p>
-        <div class="pre-block"><span class="g">$</span> vf run --pr humanbased-ai/verifyflow#60 --checkout
-
-[verifyflow] extracted 3 acceptance criteria
-[verifyflow] planned 4 steps — level functional
-[verifyflow] running: environment setup: npm ci || npm install
-[verifyflow] verdict: <span class="g">accept</span>
-
-  AC-1   <span class="g">✓ pass</span>          0.92  `npm run vf -- --version` ...
-  AC-2   <span class="g">✓ pass</span>          0.92  The short form `npm run vf -- -v` ...
-  AC-3   <span class="g">✓ pass</span>          0.92  Existing behavior is preserved ...
-
-  Verdict: <span class="g">accept</span>   (3 pass)</div>
-        <p style="margin-top:10px;">看 <code>artifacts/probe-AC-1.log</code>：</p>
-        <div class="pre-block"><span class="c">$ npm run vf -- --version
-(exit: 0, executed: true)
-----------------</span>
-<span class="g">verifyflow 0.1.0</span></div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf doctor <span class="cmd-comment"># 确认显示 [ok] LINEAR_API_KEY: set (credentials file)</span></div>
       </div>
-
     </div>
 
+    <p class="scenario-note" style="margin-left:0; margin-top:18px; margin-bottom:6px; color:#58a6ff; text-transform:uppercase; letter-spacing:0.08em; font-size:11px; font-weight:600;">② 看 vf 打算怎么验，不真跑</p>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="flag">--dry-run</span> <span class="flag">--pr</span> <span class="value">humanbased-ai/verifyflow#60</span></div>
+      </div>
+    </div>
+    <p class="scenario-note" style="margin-left:0;">→ 输出解析出的 3 条 AC + 4 个 plan 步骤（1 setup + 3 probe），不 checkout、不执行。</p>
+
+    <p class="scenario-note" style="margin-left:0; margin-top:18px; margin-bottom:6px; color:#58a6ff; text-transform:uppercase; letter-spacing:0.08em; font-size:11px; font-weight:600;">③ 真跑（拉 PR 分支 + 执行 probe + 出 verdict）</p>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="flag">--pr</span> <span class="value">humanbased-ai/verifyflow#60</span> <span class="flag">--checkout</span> <span class="cmd-comment"># 标准跑法 → verdict accept</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="flag">--pr</span> <span class="value">humanbased-ai/verifyflow#60</span> <span class="flag">--checkout</span> <span class="flag">--comment</span> <span class="cmd-comment"># 加 --comment：报告贴回 PR 评论</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="flag">--pr</span> <span class="value">humanbased-ai/verifyflow#60</span> <span class="flag">--checkout</span> <span class="flag">--level</span> <span class="value">auto</span> <span class="cmd-comment"># vf 自动选级别（这个 PR 还是 functional）</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="flag">--pr</span> <span class="value">humanbased-ai/verifyflow#60</span> <span class="flag">--checkout</span> <span class="flag">--policy</span> <span class="value">strict</span> <span class="cmd-comment"># 严格门控：非 accept 全 exit 1</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="flag">--pr</span> <span class="value">humanbased-ai/verifyflow#60</span> <span class="flag">--checkout</span> <span class="flag">--linear-writeback</span> <span class="cmd-comment"># verdict 顺手回写到 Linear issue 评论</span></div>
+      </div>
+    </div>
     <div class="callout">
-      <strong>怎么读 verdict：</strong>
-      <code>accept</code> = 全过；
-      <code>needs_fix</code> = 至少一条 probe 跑过但失败；
-      <code>manual_review_required</code> = 验证不动了（环境炸 / 没 ticket / probe 不可观测）——这次卡在 setup 上就是这一档；
-      <code>accept_with_risks</code> = 主路径过了但有副作用警告。
+      <strong>⚠️ 不加 <code>--checkout</code> 会怎样？</strong>
+      vf 会拿你当前目录的代码去验 PR #60 的 AC。如果你在 main 上（没合 PR #60），AC-1/AC-2 必失败，因为 main 上还没 <code>--version</code> 实现。<code>--checkout</code> 让 vf 自动拉 PR head 到临时目录跑。
     </div>
 
-    <div class="callout">
-      <strong>blocked vs fail：</strong>
-      <code>blocked</code> 表示 probe 根本没跑到（环境问题），<strong>不算 PR 不合格</strong>——vf 诚实承认"我没验证到"。
-      <code>fail</code> 才是"probe 跑了，PR 没满足这条 AC"。Verdict 引擎会把 blocked 计入 manual_review，不会冤枉 PR。
+    <p class="scenario-note" style="margin-left:0; margin-top:18px; margin-bottom:6px; color:#58a6ff; text-transform:uppercase; letter-spacing:0.08em; font-size:11px; font-weight:600;">④ Orchestrator 模式（脚本 / Symphony 用）</p>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf step <span class="flag">--pr</span> <span class="value">humanbased-ai/verifyflow#60</span> <span class="cmd-comment"># stdout 输出单行 JSON；advisory 永不阻断</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf step <span class="flag">--pr</span> <span class="value">humanbased-ai/verifyflow#60</span> <span class="flag">--crosscheck-verdict</span> <span class="value">approved</span> <span class="cmd-comment"># 记录上游 Crosscheck verdict</span></div>
+      </div>
     </div>
 
-    <p class="scenario-note" style="margin-left:0;">
-      复现：拉 main、装好 npm link，<code>vf onboard</code> 粘 Linear key，然后跑右栏那条命令。源 issue：<a href="https://linear.app/inductive-network/issue/IN-737/verifyflow-test-add-vf-version-flag" style="color:#58a6ff;">IN-737</a>，PR：<a href="https://github.com/humanbased-ai/verifyflow/pull/60" style="color:#58a6ff;">humanbased-ai/verifyflow#60</a>。
-    </p>
+    <p class="scenario-note" style="margin-left:0; margin-top:18px; margin-bottom:6px; color:#58a6ff; text-transform:uppercase; letter-spacing:0.08em; font-size:11px; font-weight:600;">⑤ 跑完之后：回看 / 重判 / 改进信号</p>
+    <p class="scenario-note" style="margin-left:0; margin-bottom:6px;">每次 <code>vf run</code> 末尾会打印 runId（形如 <code>IN-737_pr60_20260607170434</code>），下面命令用它。</p>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf show <span class="value">IN-737_pr60_20260607170434</span> <span class="cmd-comment"># 重新渲染那次报告的 markdown</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf replay <span class="value">IN-737_pr60_20260607170434</span> <span class="cmd-comment"># 用存的证据重判 verdict，不重跑 probe</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf signal <span class="value">IN-737_pr60_20260607170434</span> <span class="cmd-comment"># 看 improvement-signal.json（给 coding agent 的反馈）</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf report <span class="flag">--repo</span> <span class="value">humanbased-ai/verifyflow</span> <span class="cmd-comment"># 汇总这个 repo 所有 run 的质量指标</span></div>
+      </div>
+    </div>
   </div>
 
   <!-- vf run -->
