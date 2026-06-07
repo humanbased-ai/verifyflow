@@ -191,7 +191,7 @@ export function selectExistingCommentId(
  * If VerifyFlow already commented on this PR (identified by a hidden marker), edit that comment
  * in place instead of stacking a new one on every re-run (IN-560).
  */
-export async function postPrComment(report: RunReport, body: string): Promise<boolean> {
+export async function postPrComment(report: RunReport, body: string): Promise<string | undefined> {
   const repo = report.request.repo;
   const pr = report.request.prNumber;
   const marked = `${VF_COMMENT_MARKER}\n${body}`;
@@ -205,7 +205,15 @@ export async function postPrComment(report: RunReport, body: string): Promise<bo
           "api", "--method", "PATCH", `repos/${repo}/issues/comments/${existingId}`,
           "-f", `body=${marked}`,
         ]);
-        return edit.executed && edit.code === 0;
+        if (edit.executed && edit.code === 0) {
+          try {
+            const parsed = JSON.parse(edit.stdout) as { html_url?: string };
+            return parsed.html_url ?? undefined;
+          } catch {
+            return undefined;
+          }
+        }
+        return undefined;
       }
     } catch {
       /* fall through to creating a new comment */
@@ -213,5 +221,9 @@ export async function postPrComment(report: RunReport, body: string): Promise<bo
   }
 
   const res = await run("gh", ["pr", "comment", String(pr), "--repo", repo, "--body", marked]);
-  return res.executed && res.code === 0;
+  if (res.executed && res.code === 0) {
+    const url = res.stdout.trim();
+    return url.startsWith("https://") ? url : undefined;
+  }
+  return undefined;
 }
