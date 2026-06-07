@@ -17,6 +17,8 @@ export const HARNESS_ERROR_SIGNATURES: RegExp[] = [
   /\bmodulenotfounderror\b/i,
   /^usage:/im,
   /\berror: failed to\b/i,
+  // Windows cmd.exe "command not found" — different phrasing from POSIX shells.
+  /\bis not recognized as an internal or external command\b/i,
   // A regenerated/agent-invented probe in the wrong ecosystem (IN-620): Node can't find a module
   // (missing build output / wrong path), or a hallucinated pytest invocation errors on usage / runs
   // no tests. None of these are product failures — the probe itself is broken.

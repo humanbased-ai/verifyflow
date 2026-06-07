@@ -19,6 +19,13 @@ export interface ExecOptions {
   timeoutMs?: number;
   /** Hard cap on captured stdout/stderr to avoid unbounded buffers. */
   maxBuffer?: number;
+  /**
+   * When true, run the command through the platform's default shell (cmd.exe on Windows,
+   * /bin/sh elsewhere). Required for command lines containing shell operators like `||`/`&&`.
+   * For the common case `spawn(cmd, [], { shell: true })` lets the shell interpret the whole
+   * command string verbatim.
+   */
+  shell?: boolean;
 }
 
 /**
@@ -39,6 +46,7 @@ export function run(
         cwd: opts.cwd,
         env: opts.env ?? process.env,
         stdio: ["pipe", "pipe", "pipe"],
+        shell: opts.shell,
       });
     } catch (err) {
       resolve({
