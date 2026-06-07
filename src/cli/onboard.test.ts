@@ -49,8 +49,14 @@ function fakeDoctor(opts: {
   });
 }
 
+/** No-op detection helpers to prevent shell calls in tests that don't exercise detection. */
+const noDetect = {
+  detectRepo: async () => undefined as string | undefined,
+  detectPr: async () => undefined as number | undefined,
+};
+
 test("everything green → ready, no FIX steps", async () => {
-  const report = await runOnboard({ doctor: fakeDoctor({}), ghAuthed: async () => true });
+  const report = await runOnboard({ doctor: fakeDoctor({}), ghAuthed: async () => true, ...noDetect });
   assert.equal(report.ready, true);
   assert.ok(report.steps.every((s) => s.status !== "fix"));
 });
@@ -60,6 +66,7 @@ test("missing LINEAR_API_KEY (POSIX) emits an export line", async () => {
     doctor: fakeDoctor({ linear: false }),
     ghAuthed: async () => true,
     platform: "linux",
+    ...noDetect,
   });
   assert.equal(report.ready, false);
   const linear = report.steps.find((s) => s.name === "LINEAR_API_KEY")!;
@@ -74,6 +81,7 @@ test("missing LINEAR_API_KEY (Windows) emits both session + persistent PowerShel
     doctor: fakeDoctor({ linear: false }),
     ghAuthed: async () => true,
     platform: "win32",
+    ...noDetect,
   });
   const linear = report.steps.find((s) => s.name === "LINEAR_API_KEY")!;
   const joined = linear.instructions.join("\n");
@@ -88,6 +96,7 @@ test("interactive: pasted key is inlined into the export command (and not lost a
     ghAuthed: async () => true,
     platform: "linux",
     prompt: async () => pasted,
+    ...noDetect,
   });
   const linear = report.steps.find((s) => s.name === "LINEAR_API_KEY")!;
   const joined = linear.instructions.join("\n");
@@ -101,13 +110,14 @@ test("interactive but user skips: falls back to placeholder, never blocks", asyn
     ghAuthed: async () => true,
     platform: "linux",
     prompt: async () => "   ", // whitespace only
+    ...noDetect,
   });
   const linear = report.steps.find((s) => s.name === "LINEAR_API_KEY")!;
   assert.match(linear.instructions.join("\n"), /<your-linear-api-key>/);
 });
 
 test("gh installed but not authenticated → FIX with `gh auth login`", async () => {
-  const report = await runOnboard({ doctor: fakeDoctor({}), ghAuthed: async () => false });
+  const report = await runOnboard({ doctor: fakeDoctor({}), ghAuthed: async () => false, ...noDetect });
   assert.equal(report.ready, false);
   const gh = report.steps.find((s) => s.name === "gh")!;
   assert.equal(gh.status, "fix");
@@ -123,6 +133,7 @@ test("gh binary missing → FIX with install + auth instructions (no auth probe 
       ghProbeCalled = true;
       return true;
     },
+    ...noDetect,
   });
   const gh = report.steps.find((s) => s.name === "gh")!;
   assert.equal(gh.status, "fix");
@@ -134,6 +145,7 @@ test("claude missing only WARNs (not a FIX) → still ready", async () => {
   const report = await runOnboard({
     doctor: fakeDoctor({ claude: false }),
     ghAuthed: async () => true,
+    ...noDetect,
   });
   assert.equal(report.ready, true, "missing claude must not block readiness");
   const claude = report.steps.find((s) => s.name === "claude")!;
@@ -144,6 +156,7 @@ test("playwright/uv/sandbox missing surface as `info` (not `warn`) — avoids al
   const report = await runOnboard({
     doctor: fakeDoctor({ playwright: false, uv: false, sandbox: false }),
     ghAuthed: async () => true,
+    ...noDetect,
   });
   assert.equal(report.ready, true);
   for (const name of ["playwright", "uv", "sandbox"]) {
@@ -157,15 +170,82 @@ test("render output: FIX markers + smoke-test line + reverify hint when not read
     doctor: fakeDoctor({ linear: false }),
     ghAuthed: async () => true,
     platform: "linux",
+    ...noDetect,
   });
   const text = renderOnboardReport(report);
   assert.match(text, /\[FIX \] LINEAR_API_KEY/);
   assert.match(text, /Apply the FIX steps above, then re-run `vf doctor`/);
-  assert.match(text, /fixtures\/example-cli/);
+  assert.match(text, /vf demo/);
 });
 
 test("render output: ready state announces all required prerequisites are ready", async () => {
-  const report = await runOnboard({ doctor: fakeDoctor({}), ghAuthed: async () => true });
+  const report = await runOnboard({ doctor: fakeDoctor({}), ghAuthed: async () => true, ...noDetect });
   const text = renderOnboardReport(report);
   assert.match(text, /All required prerequisites are ready\./);
+});
+
+// --- repo/PR detection tests ---
+
+test("detectRepo + detectPr both resolve → smoke test uses real repo#PR", async () => {
+  const report = await runOnboard({
+    doctor: fakeDoctor({}),
+    ghAuthed: async () => true,
+    detectRepo: async () => "owner/repo",
+    detectPr: async () => 7,
+  });
+  assert.equal(report.smokeTest, "vf run --pr owner/repo#7 --level auto");
+  const repoStep = report.steps.find((s) => s.name === "repo")!;
+  assert.equal(repoStep.status, "ok");
+  assert.match(repoStep.detail, /owner\/repo/);
+});
+
+test("detectRepo resolves but detectPr returns undefined → smoke test has #<N> placeholder", async () => {
+  const report = await runOnboard({
+    doctor: fakeDoctor({}),
+    ghAuthed: async () => true,
+    detectRepo: async () => "owner/repo",
+    detectPr: async () => undefined,
+  });
+  assert.match(report.smokeTest, /vf run --pr owner\/repo#<N> --level auto/);
+  assert.match(report.smokeTest, /replace <N> with your PR number/);
+});
+
+test("both detectRepo and detectPr return undefined → smoke test uses vf demo", async () => {
+  const report = await runOnboard({
+    doctor: fakeDoctor({}),
+    ghAuthed: async () => true,
+    detectRepo: async () => undefined,
+    detectPr: async () => undefined,
+  });
+  assert.equal(report.smokeTest, "vf demo  # offline demo, no credentials needed");
+  const repoStep = report.steps.find((s) => s.name === "repo")!;
+  assert.equal(repoStep.status, "info");
+});
+
+test("gh binary missing → detectRepo/detectPr not called, smoke test uses vf demo", async () => {
+  let detectRepoCalled = false;
+  let detectPrCalled = false;
+  const report = await runOnboard({
+    doctor: fakeDoctor({ gh: false }),
+    ghAuthed: async () => true,
+    detectRepo: async () => { detectRepoCalled = true; return "owner/repo"; },
+    detectPr: async () => { detectPrCalled = true; return 1; },
+  });
+  assert.equal(detectRepoCalled, false, "detectRepo must not be called when gh binary is missing");
+  assert.equal(detectPrCalled, false, "detectPr must not be called when gh binary is missing");
+  assert.equal(report.smokeTest, "vf demo  # offline demo, no credentials needed");
+});
+
+test("repo step comes immediately after gh step in steps array", async () => {
+  const report = await runOnboard({
+    doctor: fakeDoctor({}),
+    ghAuthed: async () => true,
+    detectRepo: async () => "owner/repo",
+    detectPr: async () => 42,
+  });
+  const ghIdx = report.steps.findIndex((s) => s.name === "gh");
+  const repoIdx = report.steps.findIndex((s) => s.name === "repo");
+  assert.ok(ghIdx >= 0, "gh step must exist");
+  assert.ok(repoIdx >= 0, "repo step must exist");
+  assert.equal(repoIdx, ghIdx + 1, "repo step must come directly after gh step");
 });
