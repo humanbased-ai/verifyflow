@@ -46,6 +46,12 @@ export class ClaudeCliClient implements LlmClient {
     return hasBinary(this.bin);
   }
 
+  /** Human-readable description of which model handles which tier — for dry-run output. */
+  modelDescription(): string {
+    if (this.model) return `all calls → ${this.model} (--model override)`;
+    return `fast calls (criteria/substring) → ${this.fastModel}; smart calls (verdict/probe-repair/ui/journey) → ${this.smartModel}`;
+  }
+
   async complete(req: LlmRequest): Promise<string> {
     const model = this.model ?? (req.tier === "fast" ? this.fastModel : this.smartModel);
     const args = ["-p", req.prompt, "--output-format", "json"];
