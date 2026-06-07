@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VerifyFlow 命令参考</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      line-height: 1.6;
+    }
+
+    header {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 24px 40px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    header .logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: #58a6ff;
+      letter-spacing: -0.5px;
+    }
+
+    header .tagline {
+      font-size: 13px;
+      color: #8b949e;
+      border-left: 1px solid #30363d;
+      padding-left: 16px;
+      margin-left: 4px;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+
+    .hero {
+      text-align: center;
+      padding: 60px 0 48px;
+    }
+
+    .hero h1 {
+      font-size: 36px;
+      font-weight: 700;
+      color: #f0f6fc;
+      margin-bottom: 12px;
+    }
+
+    .hero p {
+      font-size: 16px;
+      color: #8b949e;
+      max-width: 560px;
+      margin: 0 auto 32px;
+    }
+
+    .badge {
+      display: inline-block;
+      background: #1f2937;
+      border: 1px solid #30363d;
+      border-radius: 20px;
+      padding: 6px 16px;
+      font-size: 13px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      color: #79c0ff;
+    }
+
+    .section {
+      margin-bottom: 48px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #58a6ff;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #21262d;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 20px;
+      transition: border-color 0.15s;
+    }
+
+    .card:hover {
+      border-color: #58a6ff;
+    }
+
+    .card-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+    }
+
+    .card-label.green { color: #3fb950; }
+    .card-label.blue  { color: #58a6ff; }
+    .card-label.orange { color: #d29922; }
+    .card-label.purple { color: #bc8cff; }
+    .card-label.red    { color: #f85149; }
+
+    .card p {
+      font-size: 13px;
+      color: #8b949e;
+      margin-bottom: 14px;
+    }
+
+    code {
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 13px;
+    }
+
+    .cmd-block {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .cmd-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0;
+      border-bottom: 1px solid #21262d;
+    }
+
+    .cmd-row:last-child {
+      border-bottom: none;
+    }
+
+    .cmd-row:hover {
+      background: #161b22;
+    }
+
+    .cmd-prompt {
+      color: #3fb950;
+      padding: 10px 8px 10px 14px;
+      user-select: none;
+      flex-shrink: 0;
+      font-size: 13px;
+    }
+
+    .cmd-text {
+      padding: 10px 14px 10px 4px;
+      color: #e6edf3;
+      font-size: 13px;
+      word-break: break-all;
+      flex: 1;
+    }
+
+    .cmd-text .flag {
+      color: #79c0ff;
+    }
+
+    .cmd-text .value {
+      color: #a5d6ff;
+    }
+
+    .cmd-comment {
+      color: #484f58;
+      font-style: normal;
+    }
+
+    .inline-code {
+      background: #1f2937;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 12px;
+      color: #79c0ff;
+    }
+
+    .level-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .level-table th {
+      text-align: left;
+      padding: 10px 14px;
+      background: #161b22;
+      color: #8b949e;
+      font-weight: 600;
+      border-bottom: 1px solid #21262d;
+    }
+
+    .level-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid #21262d;
+      color: #e6edf3;
+      vertical-align: top;
+    }
+
+    .level-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .level-table tr:hover td {
+      background: #161b22;
+    }
+
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-family: "SF Mono", monospace;
+    }
+
+    .tag.green  { background: #0d2818; color: #3fb950; border: 1px solid #1b4332; }
+    .tag.blue   { background: #0c1d3d; color: #58a6ff; border: 1px solid #1c3a6d; }
+    .tag.orange { background: #2d1b00; color: #d29922; border: 1px solid #4d3000; }
+    .tag.purple { background: #1d1040; color: #bc8cff; border: 1px solid #3d2080; }
+
+    .flow {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 20px 24px;
+      overflow-x: auto;
+    }
+
+    .flow-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .flow-step .icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .flow-step .label {
+      font-size: 11px;
+      color: #8b949e;
+      text-align: center;
+      max-width: 80px;
+    }
+
+    .flow-arrow {
+      color: #30363d;
+      font-size: 20px;
+      padding: 0 12px;
+      flex-shrink: 0;
+      margin-bottom: 18px;
+    }
+
+    .scenario {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 18px 20px;
+      margin-bottom: 12px;
+    }
+
+    .scenario:hover {
+      border-color: #58a6ff;
+    }
+
+    .scenario-q {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 14px;
+      color: #f0f6fc;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .scenario-q .who {
+      flex-shrink: 0;
+      font-size: 16px;
+      line-height: 1.4;
+    }
+
+    .scenario-note {
+      font-size: 12px;
+      color: #8b949e;
+      margin: 0 0 12px 26px;
+    }
+
+    .scenario .cmd-block {
+      margin-left: 26px;
+    }
+
+    footer {
+      text-align: center;
+      padding: 32px;
+      color: #484f58;
+      font-size: 12px;
+      border-top: 1px solid #21262d;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⚡ VerifyFlow</div>
+  <div class="tagline">evidence-backed delivery verification</div>
+</header>
+
+<div class="container">
+
+  <div class="hero">
+    <h1>命令参考</h1>
+    <p>自动验证 PR 是否真正交付了 Linear ticket 里的需求，生成可追溯证据，贴回 GitHub PR comment。</p>
+    <div class="badge">npm link → vf &lt;command&gt;</div>
+  </div>
+
+  <!-- 工作流 -->
+  <div class="section">
+    <div class="section-title">工作流</div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="icon" style="background:#0c1d3d;">📋</div>
+        <div class="label">Linear Ticket</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="icon" style="background:#0d2818;">🔍</div>
+        <div class="label">提取 AC</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="icon" style="background:#2d1b00;">⚙️</div>
+        <div class="label">执行探针</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="icon" style="background:#1d1040;">🤖</div>
+        <div class="label">LLM 判决</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <div class="icon" style="background:#0d2818;">📎</div>
+        <div class="label">PR Comment</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 快速开始 -->
+  <div class="section">
+    <div class="section-title">快速开始</div>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf demo <span class="cmd-comment"># 离线 demo，不需要任何账号</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf doctor <span class="cmd-comment"># 检查 gh / claude / LINEAR_API_KEY</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf onboard <span class="cmd-comment"># 引导式首次配置</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 实战场景 -->
+  <div class="section">
+    <div class="section-title">实战场景 —— 我该敲什么</div>
+
+    <div class="scenario">
+      <div class="scenario-q"><span class="who">🧑‍💻</span><span>「我刚把 PR 推上去，想确认它是不是真的把 ticket 的需求做完了」</span></div>
+      <p class="scenario-note">在目标 repo 目录里直接跑，零参数：从当前分支推断 PR，从 PR 正文里的 Linear 链接找 ticket，自动选验证级别。</p>
+      <div class="cmd-block">
+        <div class="cmd-row">
+          <div class="cmd-prompt">$</div>
+          <div class="cmd-text">cd ~/code/my-app &amp;&amp; vf run</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scenario">
+      <div class="scenario-q"><span class="who">👀</span><span>「我不在 repo 目录，只有一个 PR 号，想看看 VerifyFlow 打算怎么验，但先别真跑」</span></div>
+      <p class="scenario-note"><span class="inline-code">--dry-run</span> 把解析出来的验收标准 + 计划中的探针打印出来，不 checkout、不执行、exit 0。</p>
+      <div class="cmd-block">
+        <div class="cmd-row">
+          <div class="cmd-prompt">$</div>
+          <div class="cmd-text">vf run <span class="flag">--dry-run</span> <span class="flag">--pr</span> <span class="value">humanbased-ai/verifyflow#54</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scenario">
+      <div class="scenario-q"><span class="who">🛡️</span><span>「验证没过就别让这个 PR 合进来，并且把结论贴到 PR 上」</span></div>
+      <p class="scenario-note">真执行（<span class="inline-code">--checkout</span> 拉 PR head），把报告贴成 PR comment，<span class="inline-code">--policy merge_gate</span> 让 needs_fix 时 exit 1 卡住合并。</p>
+      <div class="cmd-block">
+        <div class="cmd-row">
+          <div class="cmd-prompt">$</div>
+          <div class="cmd-text">vf run <span class="flag">--pr</span> <span class="value">owner/repo#42</span> <span class="flag">--level</span> <span class="value">auto</span> <span class="flag">--checkout</span> <span class="flag">--comment</span> <span class="flag">--policy</span> <span class="value">merge_gate</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scenario">
+      <div class="scenario-q"><span class="who">🌐</span><span>「这是个前端改动，要真的开浏览器点一遍，而且页面需要登录」</span></div>
+      <p class="scenario-note">先用 Playwright 录一份登录态，再用 <span class="inline-code">--level ui</span> 驱动浏览器验证；<span class="inline-code">--base-url</span> 指向运行中的 app（省略则尝试从 PR 的 check 里找部署预览）。</p>
+      <div class="cmd-block">
+        <div class="cmd-row">
+          <div class="cmd-prompt">$</div>
+          <div class="cmd-text">playwright codegen <span class="flag">--save-storage</span><span class="value">=auth.json</span> <span class="value">https://app.local</span></div>
+        </div>
+        <div class="cmd-row">
+          <div class="cmd-prompt">$</div>
+          <div class="cmd-text">vf run <span class="flag">--pr</span> <span class="value">owner/repo#42</span> <span class="flag">--level</span> <span class="value">ui</span> <span class="flag">--base-url</span> <span class="value">https://app.local</span> <span class="flag">--ui-auth</span> <span class="value">auth.json</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scenario">
+      <div class="scenario-q"><span class="who">🤷</span><span>「这个 PR 压根没关联 Linear ticket，但我还是想验一下」</span></div>
+      <p class="scenario-note">降级模式：拿 PR 自己的描述当验收标准，verdict 最高只到 <span class="inline-code">manual_review_required</span>。</p>
+      <div class="cmd-block">
+        <div class="cmd-row">
+          <div class="cmd-prompt">$</div>
+          <div class="cmd-text">vf run <span class="flag">--pr</span> <span class="value">owner/repo#42</span> <span class="flag">--allow-no-ticket</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scenario">
+      <div class="scenario-q"><span class="who">🤖</span><span>「我懒得每个 PR 手动跑，让它自己盯着 repo，过了就自动合」</span></div>
+      <p class="scenario-note">独立 daemon：监听该 repo 里 Crosscheck 批准过的 PR，自动验证，accept 时 squash-merge。</p>
+      <div class="cmd-block">
+        <div class="cmd-row">
+          <div class="cmd-prompt">$</div>
+          <div class="cmd-text">vf watch <span class="flag">--repo</span> <span class="value">humanbased-ai/verifyflow</span> <span class="flag">--auto-merge</span> <span class="flag">--level</span> <span class="value">auto</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scenario">
+      <div class="scenario-q"><span class="who">📊</span><span>「想回顾一下这个 repo 最近一个月验证质量的趋势」</span></div>
+      <p class="scenario-note">把累积的历次 run 聚合成质量指标，按 repo + 时间过滤，<span class="inline-code">--trend</span> 出趋势。</p>
+      <div class="cmd-block">
+        <div class="cmd-row">
+          <div class="cmd-prompt">$</div>
+          <div class="cmd-text">vf report <span class="flag">--trend</span> <span class="flag">--repo</span> <span class="value">owner/repo</span> <span class="flag">--since</span> <span class="value">2026-05-01</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scenario">
+      <div class="scenario-q"><span class="who">🔁</span><span>「上次那个判决我觉得不对，改了判决逻辑想重判，但别再跑一遍探针」</span></div>
+      <p class="scenario-note">用存储的证据重跑 verdict 引擎——不重新 checkout、不重新执行探针。runId 在每次 <span class="inline-code">vf run</span> 输出里。</p>
+      <div class="cmd-block">
+        <div class="cmd-row">
+          <div class="cmd-prompt">$</div>
+          <div class="cmd-text">vf replay <span class="value">run_2026-05-30_a1b2c3</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scenario">
+      <div class="scenario-q"><span class="who">🎼</span><span>「我在 Symphony 编排里调 VerifyFlow，要一行机器可读的 JSON，绝不能卡流程」</span></div>
+      <p class="scenario-note">orchestrator 专用：advisory-only 永不阻断，自动从 PR 解析 Linear issue，checkout + 执行 + 贴 comment，stdout 输出单行 JSON。</p>
+      <div class="cmd-block">
+        <div class="cmd-row">
+          <div class="cmd-prompt">$</div>
+          <div class="cmd-text">vf step <span class="flag">--pr</span> <span class="value">owner/repo#42</span> <span class="flag">--crosscheck-verdict</span> <span class="value">approved</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scenario">
+      <div class="scenario-q"><span class="who">🧪</span><span>「我连账号都还没配好，就想先看看 VerifyFlow 跑出来长啥样」</span></div>
+      <p class="scenario-note">离线 demo：不需要任何凭证，跑内置 fixtures 并生成一份可读报告，<span class="inline-code">--open</span> 直接打开。</p>
+      <div class="cmd-block">
+        <div class="cmd-row">
+          <div class="cmd-prompt">$</div>
+          <div class="cmd-text">vf demo <span class="flag">--open</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- vf run -->
+  <div class="section">
+    <div class="section-title">验证 PR — vf run（参数详解）</div>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="cmd-comment"># 在目标 repo 目录下，零参数（自动推断 PR + workdir）</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="flag">--pr</span> <span class="value">owner/repo#42</span> <span class="flag">--linear</span> <span class="value">IN-123</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="flag">--pr</span> <span class="value">owner/repo#42</span> <span class="flag">--level</span> <span class="value">auto</span> <span class="flag">--checkout</span> <span class="flag">--comment</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="flag">--dry-run</span> <span class="flag">--pr</span> <span class="value">owner/repo#42</span> <span class="cmd-comment"># 只预览计划，不执行</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="flag">--pr</span> <span class="value">owner/repo#42</span> <span class="flag">--policy</span> <span class="value">merge_gate</span> <span class="cmd-comment"># 失败时阻断合并</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf run <span class="flag">--fixtures</span> <span class="value">./fixtures/my-issue</span> <span class="flag">--pr</span> <span class="value">example/repo#1</span> <span class="cmd-comment"># 离线跑</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 验证级别 -->
+  <div class="section">
+    <div class="section-title">验证级别 —— --level</div>
+    <div class="cmd-block">
+      <table class="level-table">
+        <thead>
+          <tr>
+            <th>级别</th>
+            <th>做什么</th>
+            <th>速度</th>
+            <th>需要</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag green">functional</span></td>
+            <td>命令行探针 + 测试套件</td>
+            <td>快</td>
+            <td>checkout</td>
+          </tr>
+          <tr>
+            <td><span class="tag blue">ui</span></td>
+            <td>Playwright 驱动浏览器验证 UI</td>
+            <td>中</td>
+            <td>Playwright + 运行中的 app</td>
+          </tr>
+          <tr>
+            <td><span class="tag purple">journey</span></td>
+            <td>多步骤端到端（backend + browser）</td>
+            <td>慢</td>
+            <td>checkout + Playwright</td>
+          </tr>
+          <tr>
+            <td><span class="tag orange">auto</span></td>
+            <td>根据 ticket 内容自动选最合适的级别</td>
+            <td>—</td>
+            <td>—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 合并门控 -->
+  <div class="section">
+    <div class="section-title">合并门控 —— --policy</div>
+    <div class="cmd-block">
+      <table class="level-table">
+        <thead>
+          <tr>
+            <th>策略</th>
+            <th>行为</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag green">advisory</span></td>
+            <td>默认，只报告，永不阻断</td>
+          </tr>
+          <tr>
+            <td><span class="tag orange">merge_gate</span></td>
+            <td>verdict = <code>needs_fix</code> 时 exit 1，阻断合并</td>
+          </tr>
+          <tr>
+            <td><span class="tag red" style="background:#2d0000;color:#f85149;border-color:#5c0000;">strict</span></td>
+            <td><code>manual_review_required</code> / <code>accept_with_risks</code> 也阻断</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 自动化 -->
+  <div class="section">
+    <div class="section-title">自动化 daemon — vf watch</div>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf watch <span class="flag">--repo</span> <span class="value">owner/repo</span> <span class="cmd-comment"># 监听所有新 PR，自动验证</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf watch <span class="flag">--repo</span> <span class="value">owner/repo</span> <span class="flag">--auto-merge</span> <span class="flag">--level</span> <span class="value">auto</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf watch <span class="flag">--repo</span> <span class="value">owner/repo</span> <span class="flag">--interval</span> <span class="value">120</span> <span class="cmd-comment"># 轮询间隔 120s（默认 60）</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 配置 -->
+  <div class="section">
+    <div class="section-title">目标 repo 配置 — vf init</div>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf init <span class="cmd-comment"># 在目标 repo 目录下跑，自动检测 npm/uv/go/cargo/make</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf init <span class="flag">--dir</span> <span class="value">/path/to/repo</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 历史记录 -->
+  <div class="section">
+    <div class="section-title">历史记录 & 回放</div>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf report <span class="cmd-comment"># 汇总质量指标</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf report <span class="flag">--trend</span> <span class="flag">--repo</span> <span class="value">owner/repo</span> <span class="flag">--since</span> <span class="value">2026-01-01</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf show <span class="value">&lt;runId&gt;</span> <span class="cmd-comment"># 重新渲染某次报告（runId 在每次 vf run 输出里）</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf replay <span class="value">&lt;runId&gt;</span> <span class="cmd-comment"># 用存储证据重跑判决，不重新执行探针</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf signal <span class="value">&lt;runId&gt;</span> <span class="cmd-comment"># 查看改进建议信号</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 内存 -->
+  <div class="section">
+    <div class="section-title">测试点内存 — vf memory</div>
+    <div class="cmd-block">
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf memory ls <span class="cmd-comment"># 列出所有存储的测试点</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf memory show <span class="value">&lt;key&gt;</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf memory clear <span class="flag">--repo</span> <span class="value">owner/repo</span> <span class="cmd-comment"># 清某个 repo 的记忆</span></div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-prompt">$</div>
+        <div class="cmd-text">vf memory clear <span class="flag">--yes</span> <span class="cmd-comment"># 清全部（跳过确认）</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer>VerifyFlow · evidence-backed delivery verification</footer>
+
+</body>
+</html>
