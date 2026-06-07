@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VerifyFlow — 验收条件的实测效果</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      line-height: 1.6;
+    }
+
+    header {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 24px 40px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    header .logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: #58a6ff;
+      letter-spacing: -0.5px;
+    }
+
+    header .tagline {
+      font-size: 13px;
+      color: #8b949e;
+      border-left: 1px solid #30363d;
+      padding-left: 16px;
+      margin-left: 4px;
+    }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+
+    .hero {
+      text-align: center;
+      padding: 60px 0 48px;
+    }
+
+    .hero h1 {
+      font-size: 36px;
+      font-weight: 700;
+      color: #f0f6fc;
+      margin-bottom: 12px;
+    }
+
+    .hero p {
+      font-size: 16px;
+      color: #8b949e;
+      max-width: 640px;
+      margin: 0 auto 32px;
+    }
+
+    .badge {
+      display: inline-block;
+      background: #1f2937;
+      border: 1px solid #30363d;
+      border-radius: 20px;
+      padding: 6px 16px;
+      font-size: 13px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      color: #79c0ff;
+    }
+
+    .section {
+      margin-bottom: 48px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #58a6ff;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #21262d;
+    }
+
+    .section h2 {
+      font-size: 20px;
+      color: #f0f6fc;
+      margin-bottom: 8px;
+    }
+
+    .section p.lede {
+      color: #8b949e;
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    code {
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 13px;
+    }
+
+    .inline-code {
+      background: #1f2937;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 12px;
+      color: #79c0ff;
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    @media (max-width: 760px) {
+      .compare-grid { grid-template-columns: 1fr; }
+    }
+
+    .compare-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 18px 20px;
+      transition: border-color 0.15s;
+    }
+
+    .compare-card.good { border-color: #1b4332; }
+    .compare-card.mid  { border-color: #4d3000; }
+    .compare-card.bad  { border-color: #5a1a1a; }
+
+    .compare-card .head {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+    }
+
+    .compare-card.good .head { color: #3fb950; }
+    .compare-card.mid  .head { color: #d29922; }
+    .compare-card.bad  .head { color: #f85149; }
+
+    .compare-card h3 {
+      font-size: 15px;
+      color: #f0f6fc;
+      margin-bottom: 12px;
+    }
+
+    .compare-card .metric {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 6px 0;
+      border-bottom: 1px dashed #21262d;
+      font-size: 13px;
+    }
+
+    .compare-card .metric:last-child { border-bottom: none; }
+    .compare-card .metric .k { color: #8b949e; }
+    .compare-card .metric .v { color: #e6edf3; font-weight: 600; }
+    .compare-card .metric .v.green  { color: #3fb950; }
+    .compare-card .metric .v.orange { color: #d29922; }
+    .compare-card .metric .v.red    { color: #f85149; }
+
+    .pre-block {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 12.5px;
+      color: #e6edf3;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      margin: 10px 0 0 0;
+    }
+
+    .pre-block .c { color: #484f58; }
+    .pre-block .k { color: #79c0ff; }
+    .pre-block .s { color: #a5d6ff; }
+    .pre-block .g { color: #3fb950; }
+    .pre-block .r { color: #f85149; }
+    .pre-block .o { color: #d29922; }
+
+    .result-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .result-table th {
+      text-align: left;
+      padding: 12px 14px;
+      background: #1c2129;
+      color: #8b949e;
+      font-weight: 600;
+      border-bottom: 1px solid #21262d;
+    }
+
+    .result-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid #21262d;
+      color: #e6edf3;
+      vertical-align: top;
+    }
+
+    .result-table tr:last-child td { border-bottom: none; }
+    .result-table tr:hover td { background: #1a1f27; }
+
+    .result-table .col-key { color: #8b949e; font-weight: 600; width: 30%; }
+
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-family: "SF Mono", monospace;
+    }
+
+    .tag.green  { background: #0d2818; color: #3fb950; border: 1px solid #1b4332; }
+    .tag.orange { background: #2d1b00; color: #d29922; border: 1px solid #4d3000; }
+    .tag.red    { background: #2a0e0e; color: #f85149; border: 1px solid #5a1a1a; }
+
+    .callout {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-left: 3px solid #d29922;
+      border-radius: 8px;
+      padding: 14px 18px;
+      color: #c9d1d9;
+      font-size: 14px;
+      margin: 16px 0 0 0;
+    }
+
+    .callout.good { border-left-color: #3fb950; }
+    .callout.bad  { border-left-color: #f85149; }
+
+    .callout strong { color: #f0f6fc; }
+
+    .takeaway {
+      background: linear-gradient(135deg, #0c1d3d 0%, #1d1040 100%);
+      border: 1px solid #1c3a6d;
+      border-radius: 10px;
+      padding: 22px 24px;
+    }
+
+    .takeaway h3 {
+      color: #f0f6fc;
+      font-size: 16px;
+      margin-bottom: 10px;
+    }
+
+    .takeaway p {
+      color: #c9d1d9;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .takeaway ul {
+      padding-left: 20px;
+      color: #c9d1d9;
+      font-size: 14px;
+    }
+
+    .takeaway ul li { margin: 6px 0; }
+
+    footer {
+      text-align: center;
+      padding: 32px;
+      color: #484f58;
+      font-size: 12px;
+      border-top: 1px solid #21262d;
+    }
+
+    footer a { color: #58a6ff; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⚡ VerifyFlow</div>
+  <div class="tagline">验收条件的实测效果</div>
+</header>
+
+<div class="container">
+
+  <div class="hero">
+    <h1>Linear issue 写不写验收条件，工具表现差多少？</h1>
+    <p>同一个 PR，同一份代码，只改 Linear issue 描述的"颗粒度"——看 VerifyFlow 提取出多少标准、能不能跑、verdict 能到哪一档。</p>
+    <div class="badge">vf run --dry-run --fixtures &lt;dir&gt;</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">实验设定</div>
+    <h2>变量只有一个：issue 描述</h2>
+    <p class="lede">
+      复用 <span class="inline-code">fixtures/example-cli</span>：同一份 PR（example/greet#7，"加 --version 标志"），同一份目标代码。
+      仅把 <span class="inline-code">issue.json</span> 的 <span class="inline-code">description</span> 改成三种写法，跑 <span class="inline-code">vf run --dry-run</span> 看工具实际解析出什么。
+    </p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">三组对照（实测输出）</div>
+
+    <div class="compare-grid">
+
+      <div class="compare-card good">
+        <div class="head">A · 有验收条件</div>
+        <h3>带 <code>## Acceptance Criteria</code> 段</h3>
+        <div class="metric"><span class="k">解析出标准</span><span class="v green">2 条</span></div>
+        <div class="metric"><span class="k">来源</span><span class="v">linear_explicit</span></div>
+        <div class="metric"><span class="k">probe 命令</span><span class="v green">正确、可执行</span></div>
+        <div class="metric"><span class="k">质量警告</span><span class="v">无</span></div>
+        <div class="metric"><span class="k">verdict 上限</span><span class="v green">accept</span></div>
+      </div>
+
+      <div class="compare-card mid">
+        <div class="head">B · 只有 Summary</div>
+        <h3>只有概述、无 AC 段</h3>
+        <div class="metric"><span class="k">解析出标准</span><span class="v orange">1 条</span></div>
+        <div class="metric"><span class="k">来源</span><span class="v">linear_explicit</span></div>
+        <div class="metric"><span class="k">probe 命令</span><span class="v orange">抠出来的、不准</span></div>
+        <div class="metric"><span class="k">质量警告</span><span class="v">无</span></div>
+        <div class="metric"><span class="k">verdict 上限</span><span class="v orange">受限</span></div>
+      </div>
+
+      <div class="compare-card bad">
+        <div class="head">C · 完全模糊</div>
+        <h3>"用户想要这个"</h3>
+        <div class="metric"><span class="k">解析出标准</span><span class="v red">1 条占位</span></div>
+        <div class="metric"><span class="k">来源</span><span class="v">linear_implicit</span></div>
+        <div class="metric"><span class="k">probe 命令</span><span class="v red">无</span></div>
+        <div class="metric"><span class="k">质量警告</span><span class="v red">已记录</span></div>
+        <div class="metric"><span class="k">verdict 上限</span><span class="v red">manual_review_required</span></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">A · 完整写法 — issue 与解析结果</div>
+    <h2>带 <code>## Acceptance Criteria</code> 段，命令用反引号包起来</h2>
+    <p class="lede">工具直接把每条标准变成一个独立 probe，命令可以照搬运行。</p>
+
+    <div class="pre-block"><span class="c">// issue.description</span>
+## Summary
+
+`greet --version` should print the tool name and version so users
+know which build they run.
+
+## Acceptance Criteria
+
+* `node bin/greet.mjs --version` prints `ExampleCLI &lt;version&gt;`
+  (e.g. `ExampleCLI 1.2.3`) and exits 0.
+* Version value is read from package.json metadata — not hardcoded.</div>
+
+    <div class="pre-block"><span class="c">// vf run --dry-run 输出</span>
+<span class="g">## Resolved acceptance criteria (2)</span>
+- <span class="k">AC-1</span> [linear_explicit, backend, <span class="g">observable</span>]:
+  `node bin/greet.mjs --version` prints `ExampleCLI &lt;version&gt;` ... exits 0.
+    probe: <span class="s">node bin/greet.mjs --version</span> (from ticket)
+- <span class="k">AC-2</span> [linear_explicit, backend, <span class="g">observable</span>]:
+  Version value is read from package.json metadata — not hardcoded.</div>
+
+    <div class="callout good">
+      <strong>结果：</strong>2 条标准，AC-1 的 probe 直接是 ticket 里给的命令——验证阶段可以原样执行并对照预期。AC-2（"不许硬编码"）这条没有 ticket 也根本不会被检查到。
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">B · 只有 Summary — issue 与解析结果</div>
+    <h2>只保留概述，没有显式 AC 段</h2>
+    <p class="lede">工具退而求其次，从描述里硬找一句包含命令模样的话当 probe——结果不一定靠谱。</p>
+
+    <div class="pre-block"><span class="c">// issue.description</span>
+## Summary
+
+`greet --version` should print the tool name and version so users
+know which build they run.</div>
+
+    <div class="pre-block"><span class="c">// vf run --dry-run 输出</span>
+<span class="o">## Resolved acceptance criteria (1)</span>
+- <span class="k">AC-1</span> [linear_explicit, backend, observable]:
+  `greet --version` should print the tool name ...
+    probe: <span class="o">greet --version</span> <span class="c">(from ticket — but this command is wrong:</span>
+                                  <span class="c">real PR needs `node bin/greet.mjs --version`)</span></div>
+
+    <div class="callout">
+      <strong>结果：</strong>标准从 2 条砍到 1 条。probe 命令从 Summary 反引号里抠出来的是 <code>greet</code>，但 PR 的实际入口是 <code>node bin/greet.mjs</code>——跑下去会直接失败，不是因为代码错，是因为标准本身错。
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">C · 完全模糊 — issue 与解析结果</div>
+    <h2>没有任何技术细节</h2>
+    <p class="lede">工具走最后兜底：把标题/首句当占位标准，并显式记录"ticket 质量不达标"。</p>
+
+    <div class="pre-block"><span class="c">// issue.description</span>
+Users have been asking for this. Let's add it.</div>
+
+    <div class="pre-block"><span class="c">// vf run --dry-run 输出</span>
+<span class="r">## Resolved acceptance criteria (1)</span>
+- <span class="k">AC-1</span> [<span class="r">linear_implicit</span>, backend, observable]:
+  Users have been asking for this. Let's add it.
+
+<span class="r">## Ticket quality notes</span>
+- <span class="r">No explicit acceptance criteria found in the Linear issue;</span>
+  <span class="r">criteria inferred from summary.</span></div>
+
+    <div class="callout bad">
+      <strong>结果：</strong>来源标签从 <code>linear_explicit</code> 掉到 <code>linear_implicit</code>；没有 probe 命令；质量警告写进报告。即便实际跑代码全过，verdict 也被锁在 <code>manual_review_required</code>，拿不到 <code>accept</code>。
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">汇总对比</div>
+    <table class="result-table">
+      <thead>
+        <tr>
+          <th class="col-key">维度</th>
+          <th>A · 有 AC 段</th>
+          <th>B · 只有 Summary</th>
+          <th>C · 模糊</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="col-key">解析出的标准数</td>
+          <td><span class="tag green">2</span></td>
+          <td><span class="tag orange">1</span></td>
+          <td><span class="tag red">1 (占位)</span></td>
+        </tr>
+        <tr>
+          <td class="col-key">probe 命令</td>
+          <td>正确，可直接执行</td>
+          <td>抠出来的，不对</td>
+          <td>无</td>
+        </tr>
+        <tr>
+          <td class="col-key">标准来源</td>
+          <td><code>linear_explicit</code></td>
+          <td><code>linear_explicit</code></td>
+          <td><code>linear_implicit</code></td>
+        </tr>
+        <tr>
+          <td class="col-key">质量警告</td>
+          <td>无</td>
+          <td>无</td>
+          <td>"No explicit acceptance criteria found"</td>
+        </tr>
+        <tr>
+          <td class="col-key">"不许硬编码"被验证到？</td>
+          <td><span class="tag green">是</span></td>
+          <td><span class="tag red">否</span> — 标准丢失</td>
+          <td><span class="tag red">否</span> — 标准丢失</td>
+        </tr>
+        <tr>
+          <td class="col-key">最高可达 verdict</td>
+          <td><span class="tag green">accept</span></td>
+          <td><span class="tag orange">受限</span></td>
+          <td><span class="tag red">manual_review_required</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">为什么 LLM 不能替你补</div>
+    <p class="lede">VerifyFlow 的 LLM 富化阶段 (<code>src/core/criteria/parser.ts:197</code>) 的 system prompt 写得很死：</p>
+    <div class="pre-block">"The Linear issue is the ONLY source of truth for acceptance
+criteria ... <span class="r">Do not invent criteria the issue does not support.</span>"</div>
+    <p class="lede" style="margin-top:12px;">原因很简单：如果允许 AI 一边看着 PR 改了什么、一边自动生成"该验证什么"，那就是后视镜出题——只会出能通过的题。工具的核心价值是"在写代码<em>之前</em>定下的合同"和"写代码<em>之后</em>的产物"之间做对账。</p>
+  </div>
+
+  <div class="section">
+    <div class="takeaway">
+      <h3>结论</h3>
+      <p>Linear issue 里的验收条件不是文书工作——它是 VerifyFlow 用来验证 PR 的合同。三组实测显示：</p>
+      <ul>
+        <li><strong>没有验收条件，工具就是瞎跑</strong>：probe 命令错的、覆盖项目少一半、verdict 被锁顶。</li>
+        <li><strong>AI 不会替你补</strong>：被故意限死，防止 AI 自己出题自己答题。</li>
+        <li><strong>建议写法</strong>：在 issue 描述里加一个 <code>## Acceptance Criteria</code> 段，每条用反引号包"可观测命令 + 预期输出/退出码"。例：<code>运行 `node bin/x.mjs --version` 应输出 `Foo 1.2.3` 退出码 0</code>。</li>
+        <li><strong>顺序很重要</strong>：先写 issue → 人过一眼 → 再写 PR。倒过来等于白做。</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  VerifyFlow · 详见 <a href="./ac-vs-no-ac.md">ac-vs-no-ac.md</a> · <a href="./commands.html">命令参考</a>
+</footer>
+
+</body>
+</html>
