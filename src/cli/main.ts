@@ -891,7 +891,7 @@ async function cmdDemo(args: Args): Promise<number> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const PKG_ROOT = path.resolve(__dirname, "..", "..");
   const fixturesDir = path.join(PKG_ROOT, "fixtures", "example-cli");
-  const workdir = path.join(PKG_ROOT, "fixtures", "example-target");
+  const workdir = path.join(PKG_ROOT, "examples", "example-target");
   const tempDir = path.join(os.tmpdir(), `verifyflow-demo-${Date.now()}`);
 
   console.error("[verifyflow] Running offline demo — no credentials needed...");
