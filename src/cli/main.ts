@@ -524,6 +524,10 @@ async function cmdDryRun(args: Args): Promise<number> {
     console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
     return 2;
   }
+  // Prepend model-tiering note so the dry-run makes the routing decision visible.
+  if (llm instanceof ClaudeCliClient) {
+    preview.plan.notes.unshift(`LLM model tiering: ${llm.modelDescription()}`);
+  }
   // `--json` emits the machine-readable preview for tooling; the default markdown is for humans.
   console.log(args.json ? JSON.stringify(preview, null, 2) : renderPlanPreview(preview));
   return 0;
