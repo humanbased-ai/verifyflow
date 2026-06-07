@@ -189,6 +189,7 @@ function parseArgs(argv: string[]): { cmd: string; args: Args; positionals: stri
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "-h" || a === "--help") args.help = true;
+    else if (a === "-v" || a === "--version") args.version = true;
     else if (a.startsWith("--")) {
       const key = a.slice(2);
       const next = argv[i + 1];
@@ -1172,6 +1173,17 @@ async function cmdDemo(args: Args): Promise<number> {
 
 async function main(): Promise<number> {
   const { cmd, args, positionals } = parseArgs(process.argv.slice(2));
+  // `--version` / `-v`: print the package version (read from package.json) and exit 0.
+  // Handled before `--help` so `vf --version` doesn't fall through to usage.
+  if (args.version || cmd === "--version" || cmd === "-v") {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    // Resolve package.json relative to this module: src/cli/main.ts → ../../package.json
+    // (and dist/cli/main.js → ../../package.json), so both run modes work.
+    const pkgPath = path.resolve(here, "..", "..", "package.json");
+    const pkg = JSON.parse(await (await import("node:fs/promises")).readFile(pkgPath, "utf8")) as { version: string };
+    console.log(`verifyflow ${pkg.version}`);
+    return 0;
+  }
   // `help`, `--help`/`-h` as the first token, or any `--help`/`-h` flag → usage (exit 0).
   // An empty invocation still prints usage but exits 2 (nothing to do).
   if (args.help || cmd === "" || cmd === "help" || cmd === "--help" || cmd === "-h") {
