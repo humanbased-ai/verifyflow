@@ -38,6 +38,10 @@ export interface OnboardDeps {
    * generic instructions instead of blocking on stdin.
    */
   prompt?: (question: string) => Promise<string>;
+  /** Detect current repo as "owner/repo". Defaults to running `gh repo view`. */
+  detectRepo?: () => Promise<string | undefined>;
+  /** Detect open PR number for the current branch. Defaults to running `gh pr view`. */
+  detectPr?: () => Promise<number | undefined>;
 }
 
 function setEnvCommand(platform: NodeJS.Platform, name: string, value: string): string[] {
@@ -60,10 +64,24 @@ async function defaultGhAuthed(): Promise<boolean> {
   return r.executed && r.code === 0;
 }
 
+async function defaultDetectRepo(): Promise<string | undefined> {
+  const r = await run("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]);
+  const out = r.stdout.trim();
+  return r.executed && r.code === 0 && out ? out : undefined;
+}
+
+async function defaultDetectPr(): Promise<number | undefined> {
+  const r = await run("gh", ["pr", "view", "--json", "number", "-q", ".number"]);
+  const n = parseInt(r.stdout.trim(), 10);
+  return r.executed && r.code === 0 && !isNaN(n) ? n : undefined;
+}
+
 export async function runOnboard(deps: OnboardDeps = {}): Promise<OnboardReport> {
   const platform = deps.platform ?? process.platform;
   const doctor = deps.doctor ?? (() => runDoctor());
   const ghAuthed = deps.ghAuthed ?? defaultGhAuthed;
+  const detectRepo = deps.detectRepo ?? defaultDetectRepo;
+  const detectPr = deps.detectPr ?? defaultDetectPr;
   const report = await doctor();
   const steps: OnboardStep[] = [];
 
@@ -74,6 +92,7 @@ export async function runOnboard(deps: OnboardDeps = {}): Promise<OnboardReport>
   // a distinct failure mode that doctor can't see — onboard probes it so the user gets the right
   // remediation (install vs login) instead of a misleading "gh: ok" followed by silent API 401s.
   const gh = findCheck((n) => n === "gh");
+  let ghBinaryPresent = false;
   if (gh && !gh.ok) {
     steps.push({
       name: "gh",
@@ -85,6 +104,7 @@ export async function runOnboard(deps: OnboardDeps = {}): Promise<OnboardReport>
       ],
     });
   } else if (gh) {
+    ghBinaryPresent = true;
     const authed = await ghAuthed();
     steps.push(
       authed
@@ -96,6 +116,24 @@ export async function runOnboard(deps: OnboardDeps = {}): Promise<OnboardReport>
             instructions: ["Authenticate: gh auth login"],
           },
     );
+  }
+
+  // repo detection: only run when gh binary is present. Surfaced as `info` (not a blocker) when
+  // the repo cannot be detected — the user may simply not be inside a git checkout.
+  let repo: string | undefined;
+  let pr: number | undefined;
+  if (ghBinaryPresent) {
+    repo = await detectRepo();
+    if (repo) pr = await detectPr();
+    const repoStep: OnboardStep = repo
+      ? { name: "repo", status: "ok", detail: `detected ${repo}`, instructions: [] }
+      : {
+          name: "repo",
+          status: "info",
+          detail: "could not detect repo from current directory",
+          instructions: [],
+        };
+    steps.push(repoStep);
   }
 
   // LINEAR_API_KEY: the FAIL most newcomers hit. Interactive flow inlines the pasted value into
@@ -189,13 +227,18 @@ export async function runOnboard(deps: OnboardDeps = {}): Promise<OnboardReport>
     });
   }
 
+  // Build dynamic smoke-test command based on what was detected.
+  let smokeTest: string;
+  if (repo && pr !== undefined) {
+    smokeTest = `vf run --pr ${repo}#${pr} --level auto`;
+  } else if (repo) {
+    smokeTest = `vf run --pr ${repo}#<N> --level auto  # replace <N> with your PR number`;
+  } else {
+    smokeTest = "vf demo  # offline demo, no credentials needed";
+  }
+
   const ready = steps.every((s) => s.status !== "fix");
-  return {
-    steps,
-    ready,
-    smokeTest:
-      "npm run vf -- run --fixtures fixtures/example-cli --linear EX-1 --pr example/greet#7 --level functional",
-  };
+  return { steps, ready, smokeTest };
 }
 
 const ICON: Record<OnboardStatus, string> = {
@@ -220,7 +263,7 @@ export function renderOnboardReport(report: OnboardReport): string {
       : "Apply the FIX steps above, then re-run `vf doctor` to verify.",
   );
   lines.push("");
-  lines.push("Smoke-test (offline, no credentials needed):");
+  lines.push("Smoke-test:");
   lines.push(`  ${report.smokeTest}`);
   return lines.join("\n");
 }
