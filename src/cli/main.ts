@@ -4,7 +4,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { runVerification, planRun, type PipelineDeps, type PlanPreview } from "../core/pipeline.js";
-import type { Level, Policy, RunRequest } from "../types.js";
+import type { Level, Policy, RunReport, RunRequest } from "../types.js";
 import { GhCliClient, FixtureGithubClient, parsePrRef } from "../core/context/github.js";
 import { FixtureLinearClient, LinearApiClient, type LinearClient } from "../core/context/linear.js";
 import { ClaudeCliClient } from "../backends/claudeCli.js";
@@ -45,6 +45,38 @@ import {
   ghMergePr,
   type WatchDeps,
 } from "./watch.js";
+
+const RESULT_LABEL: Record<string, string> = {
+  pass: "✓ pass",
+  fail: "✗ fail",
+  partial: "~ partial",
+  not_evaluable: "? not_evaluable",
+  blocked: "⊘ blocked",
+};
+
+function printCriterionTable(report: RunReport): void {
+  const results = report.criterionResults;
+  if (!results.length) return;
+  const bar = "─".repeat(70);
+  console.error(`\n${bar}`);
+  for (const c of results) {
+    const label = (RESULT_LABEL[c.result] ?? c.result).padEnd(14);
+    const conf = c.confidence.toFixed(2);
+    const text = c.criterion.length > 55 ? c.criterion.slice(0, 52) + "..." : c.criterion;
+    console.error(`  ${c.criterionId.padEnd(5)}  ${label}  ${conf}  ${text}`);
+  }
+  const pass = results.filter(r => r.result === "pass").length;
+  const fail = results.filter(r => r.result === "fail").length;
+  const partial = results.filter(r => r.result === "partial").length;
+  const blocked = results.filter(r => r.result === "blocked" || r.result === "not_evaluable").length;
+  const parts = [`${pass} pass`];
+  if (fail) parts.push(`${fail} fail`);
+  if (partial) parts.push(`${partial} partial`);
+  if (blocked) parts.push(`${blocked} blocked/not_evaluable`);
+  console.error(bar);
+  console.error(`  Verdict: ${report.runVerdict}   (${parts.join(", ")})`);
+  console.error(`${bar}\n`);
+}
 
 const USAGE = `verifyflow — evidence-backed delivery verification
 
@@ -184,6 +216,7 @@ interface RunOutcome {
   reportPaths: Awaited<ReturnType<typeof runVerification>>["reportPaths"];
   signalPath?: string;
   prCommentPosted: boolean;
+  prCommentUrl?: string;
 }
 
 /**
@@ -342,6 +375,7 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     eventLog: new EventLog(outputRoot),
     uiHarnessFactory,
     journeyHarnessFactory,
+    onProgress: (msg) => console.error(`[verifyflow] ${msg}`),
   };
 
   if (!request.workdir) {
@@ -358,12 +392,15 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
   }
   const { report, runDir, reportPaths, signalPath } = runResult;
 
+  printCriterionTable(report);
+
   console.error(`\n[verifyflow] reports: ${reportPaths.markdownPath} | ${reportPaths.jsonPath}`);
   if (signalPath) {
     console.error(`[verifyflow] bounce-back signal (feed to the coding agent): ${signalPath}`);
   }
 
   let prCommentPosted = false;
+  let prCommentUrl: string | undefined;
   if (args.comment && !fixtures) {
     // IN-675: host visual evidence (screenshots/trace) so the comment can embed it; best-effort,
     // an empty map just falls back to bare on-disk paths.
@@ -371,10 +408,13 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     if (Object.keys(evidenceUrls).length) {
       console.error(`[verifyflow] hosted ${Object.keys(evidenceUrls).length} evidence artifact(s) on ${EVIDENCE_BRANCH}.`);
     }
-    prCommentPosted = await postPrComment(report, renderMarkdown(report, { evidenceUrls }));
-    console.error(
-      prCommentPosted ? "[verifyflow] posted/updated PR comment." : "[verifyflow] failed to post PR comment.",
-    );
+    prCommentUrl = await postPrComment(report, renderMarkdown(report, { evidenceUrls }));
+    prCommentPosted = prCommentUrl !== undefined;
+    if (prCommentUrl) {
+      console.error(`[verifyflow] evidence: ${prCommentUrl}`);
+    } else {
+      console.error("[verifyflow] failed to post PR comment.");
+    }
   }
 
   if (args["linear-writeback"] && !fixtures && linear.addComment && report.issue.source !== "pr-degraded") {
@@ -385,7 +425,7 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     console.error(ok ? "[verifyflow] posted Linear comment." : "[verifyflow] failed to post Linear comment.");
   }
 
-  return { report, runDir, reportPaths, signalPath, prCommentPosted };
+  return { report, runDir, reportPaths, signalPath, prCommentPosted, prCommentUrl };
 }
 
 /**

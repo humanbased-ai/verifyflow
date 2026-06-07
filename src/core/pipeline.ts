@@ -53,6 +53,8 @@ export interface PipelineDeps {
   journeyHarness?: JourneyHarness;
   /** Builds the journey harness once the artifact dir is known (mirrors uiHarnessFactory). */
   journeyHarnessFactory?: (artifactRoot: string) => JourneyHarness;
+  /** Optional progress sink — called at key pipeline stages. Written to stderr by the CLI. */
+  onProgress?: (msg: string) => void;
 }
 
 export interface PipelineOutput {
@@ -217,9 +219,11 @@ export async function runVerification(
 
   // --- Context: PR is reference, Linear issue is the source of truth -------------------
   const { pr, issue, degraded } = await resolveContext(req, deps);
+  deps.onProgress?.(`fetched ${issue.key} and PR #${pr.number} (${pr.changedFiles.length} changed files)`);
 
   // --- Criteria (from the issue) ------------------------------------------------------
   const criteria = await parseCriteria(issue, pr, deps.llm);
+  deps.onProgress?.(`extracted ${criteria.criteria.length} acceptance criteria`);
 
   // --- Auto level (IN-680): resolve `--level auto` now that the criteria exist ---------
   const sel = req.autoSelect ? selectLevel(criteria, pr, req.autoSelect) : undefined;
@@ -238,6 +242,7 @@ export async function runVerification(
     artifactRoot,
   );
   if (sel) plan.notes.unshift(...sel.notes);
+  deps.onProgress?.(`planned ${plan.steps.length} steps — level ${eff.level}`);
   const results: HarnessResult[] = [];
 
   if (eff.level === "journey") {
@@ -258,6 +263,7 @@ export async function runVerification(
     }
     const runner = new CommandRunner(eff.workdir, artifactRoot, { isolate: eff.sandbox !== false });
     for (const step of plan.steps) {
+      deps.onProgress?.(`running: ${step.description}`);
       if (step.id.startsWith("probe-")) {
         const criterionText = criteria.criteria.find((c) => c.id === step.criterionIds[0])?.text;
         results.push(await runProbeWithSelfCheck(runner, step, criterionText, cfg, deps.llm));
@@ -274,6 +280,7 @@ export async function runVerification(
 
   // --- Verdict -------------------------------------------------------------------------
   const verdict = await decideVerdict(criteria, plan, results, deps.llm);
+  deps.onProgress?.(`verdict: ${verdict.runVerdict}`);
 
   // Degraded cap (IN-570): without an independent acceptance source, a positive outcome
   // can only mean "the PR does what it claims" — escalate to a human instead of accepting.
