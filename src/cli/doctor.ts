@@ -1,4 +1,5 @@
 import { hasBinary } from "../util/exec.js";
+import { resolveLinearApiKey } from "./credentials.js";
 
 /**
  * `vf doctor` (IN-611): report whether the CLIs and env VerifyFlow relies on are present, so a
@@ -27,6 +28,11 @@ export interface DoctorDeps {
   hasBin?: (name: string) => Promise<boolean>;
   /** Whether Playwright is importable (the ui-level browser backend). Injectable for tests. */
   hasPlaywright?: () => Promise<boolean>;
+  /**
+   * Resolve the Linear API key (env first, then ~/.verifyflow/credentials.json). Injectable so
+   * tests don't depend on the user's real credentials file.
+   */
+  resolveLinearKey?: (env: NodeJS.ProcessEnv) => Promise<string | undefined>;
 }
 
 /** Default Playwright probe: is the optional `playwright` module importable? */
@@ -45,23 +51,33 @@ export async function runDoctor(deps: DoctorDeps = {}): Promise<DoctorReport> {
   const env = deps.env ?? process.env;
   const hasBin = deps.hasBin ?? hasBinary;
   const hasPlaywright = deps.hasPlaywright ?? playwrightImportable;
+  const resolveLinear = deps.resolveLinearKey ?? ((e) => resolveLinearApiKey(e));
 
-  const [gh, claude, uv, docker, podman, playwright] = await Promise.all([
+  const [gh, claude, uv, docker, podman, playwright, linearKey] = await Promise.all([
     hasBin("gh"),
     hasBin("claude"),
     hasBin("uv"),
     hasBin("docker"),
     hasBin("podman"),
     hasPlaywright(),
+    resolveLinear(env),
   ]);
-  const linear = Boolean(env.LINEAR_API_KEY);
+  const linear = Boolean(linearKey);
+  const linearSource = env.LINEAR_API_KEY ? "env" : linearKey ? "credentials file" : null;
   // Either container runtime satisfies the sandbox prerequisite (IN-555).
   const sandbox = docker || podman;
   const sandboxRuntime = docker ? "docker" : podman ? "podman" : null;
 
   const checks: DoctorCheck[] = [
     { name: "gh", ok: gh, required: true, detail: gh ? "found" : "not found on PATH — needed for GitHub PR context" },
-    { name: "LINEAR_API_KEY", ok: linear, required: true, detail: linear ? "set" : "not set — needed for live Linear issue access (or use --fixtures)" },
+    {
+      name: "LINEAR_API_KEY",
+      ok: linear,
+      required: true,
+      detail: linear
+        ? `set (${linearSource})`
+        : "not set — needed for live Linear issue access (or use --fixtures)",
+    },
     { name: "claude", ok: claude, required: false, detail: claude ? "found" : "not found — VerifyFlow falls back to the deterministic LLM backend" },
     { name: "uv", ok: uv, required: false, detail: uv ? "found" : "not found — only needed for python-uv target repos" },
     {

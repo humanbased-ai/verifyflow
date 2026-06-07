@@ -89,31 +89,67 @@ test("missing LINEAR_API_KEY (Windows) emits both session + persistent PowerShel
   assert.match(joined, /SetEnvironmentVariable\("LINEAR_API_KEY", "<your-linear-api-key>", "User"\)/);
 });
 
-test("interactive: pasted key is inlined into the export command (and not lost as a placeholder)", async () => {
+test("interactive: pasted key is saved to credentials file (not just printed)", async () => {
   const pasted = "lin_api_PASTED_VALUE_xyz";
+  let savedCreds: { linearApiKey?: string } | undefined;
   const report = await runOnboard({
     doctor: fakeDoctor({ linear: false }),
     ghAuthed: async () => true,
     platform: "linux",
     prompt: async () => pasted,
+    saveCredentials: async (creds) => {
+      savedCreds = creds;
+      return "/fake/home/.verifyflow/credentials.json";
+    },
     ...noDetect,
   });
   const linear = report.steps.find((s) => s.name === "LINEAR_API_KEY")!;
+  assert.equal(linear.status, "ok", "credentials saved → step is ok, not fix");
+  assert.equal(savedCreds?.linearApiKey, pasted);
+  assert.match(linear.detail, /saved to .*credentials\.json/);
+  // The pasted key itself MUST NOT appear in printed instructions — only the path does.
   const joined = linear.instructions.join("\n");
-  assert.match(joined, new RegExp(`export LINEAR_API_KEY="${pasted}"`));
-  assert.doesNotMatch(joined, /<your-linear-api-key>/);
+  assert.doesNotMatch(joined, new RegExp(pasted));
+  // Onboard ready when save succeeds (no remaining FIX steps).
+  assert.equal(report.ready, true);
 });
 
-test("interactive but user skips: falls back to placeholder, never blocks", async () => {
+test("interactive but user skips: falls back to placeholder env command, never blocks", async () => {
+  let saveCalled = false;
   const report = await runOnboard({
     doctor: fakeDoctor({ linear: false }),
     ghAuthed: async () => true,
     platform: "linux",
     prompt: async () => "   ", // whitespace only
+    saveCredentials: async () => {
+      saveCalled = true;
+      return "/should-not-be-called";
+    },
     ...noDetect,
   });
   const linear = report.steps.find((s) => s.name === "LINEAR_API_KEY")!;
+  assert.equal(linear.status, "fix");
   assert.match(linear.instructions.join("\n"), /<your-linear-api-key>/);
+  assert.equal(saveCalled, false, "credentials must not be saved when user skips");
+});
+
+test("interactive: save failure falls back to printing env command, still reachable", async () => {
+  const pasted = "lin_api_PASTED";
+  const report = await runOnboard({
+    doctor: fakeDoctor({ linear: false }),
+    ghAuthed: async () => true,
+    platform: "linux",
+    prompt: async () => pasted,
+    saveCredentials: async () => {
+      throw new Error("EACCES: permission denied");
+    },
+    ...noDetect,
+  });
+  const linear = report.steps.find((s) => s.name === "LINEAR_API_KEY")!;
+  assert.equal(linear.status, "fix");
+  const joined = linear.instructions.join("\n");
+  assert.match(joined, /Could not write credentials file/);
+  assert.match(joined, new RegExp(`export LINEAR_API_KEY="${pasted}"`));
 });
 
 test("gh installed but not authenticated → FIX with `gh auth login`", async () => {

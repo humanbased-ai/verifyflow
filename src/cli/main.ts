@@ -7,6 +7,7 @@ import { runVerification, planRun, type PipelineDeps, type PlanPreview } from ".
 import type { Level, Policy, RunReport, RunRequest } from "../types.js";
 import { GhCliClient, FixtureGithubClient, parsePrRef } from "../core/context/github.js";
 import { FixtureLinearClient, LinearApiClient, type LinearClient } from "../core/context/linear.js";
+import { resolveLinearApiKey } from "./credentials.js";
 import { ClaudeCliClient } from "../backends/claudeCli.js";
 import { FallbackLlm } from "../backends/fallbackLlm.js";
 import type { LlmClient } from "../backends/llm.js";
@@ -191,19 +192,20 @@ async function buildLlm(args: Args): Promise<LlmClient> {
  * an exit code on a usage error (e.g. live mode without LINEAR_API_KEY). Shared by `run`/`step`
  * (execution) and `run --dry-run` (planning only).
  */
-function buildContextClients(
+async function buildContextClients(
   args: Args,
-): { linear: LinearClient; github: GhCliClient | FixtureGithubClient; fixtures?: string } | number {
+): Promise<{ linear: LinearClient; github: GhCliClient | FixtureGithubClient; fixtures?: string } | number> {
   const fixtures = str(args.fixtures);
   if (fixtures) {
     const dir = path.resolve(fixtures);
     return { linear: new FixtureLinearClient(dir), github: new FixtureGithubClient(dir), fixtures };
   }
-  const key = process.env.LINEAR_API_KEY;
+  const key = await resolveLinearApiKey();
   if (!key) {
     console.error(
-      "error: live mode needs LINEAR_API_KEY (Linear is the criteria source). " +
-        "Use --fixtures <dir> for offline runs, or capture the issue via the Linear connector.",
+      "error: live mode needs a Linear API key (Linear is the criteria source). " +
+        "Set LINEAR_API_KEY, or run `vf onboard` to save it to ~/.verifyflow/credentials.json, " +
+        "or pass --fixtures <dir> for offline runs.",
     );
     return 2;
   }
@@ -248,7 +250,7 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     return 2;
   }
   // Build context clients.
-  const clients = buildContextClients(args);
+  const clients = await buildContextClients(args);
   if (typeof clients === "number") return clients;
   const { linear, github, fixtures } = clients;
 
@@ -527,7 +529,7 @@ async function cmdDryRun(args: Args): Promise<number> {
     return 2;
   }
   const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
-  const clients = buildContextClients(args);
+  const clients = await buildContextClients(args);
   if (typeof clients === "number") return clients;
   const llm = await buildLlm(args);
 

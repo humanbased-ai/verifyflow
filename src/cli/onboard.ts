@@ -1,11 +1,13 @@
 import { runDoctor, type DoctorReport } from "./doctor.js";
 import { run } from "../util/exec.js";
+import { writeCredentials, getCredentialsPath, type Credentials } from "./credentials.js";
 
 /**
  * `vf onboard` (#41): guided first-run setup. Doctor *diagnoses*; onboard *guides* — for each
  * missing prerequisite it prints the exact fix command for the user's platform (PowerShell on
- * Windows, POSIX shell elsewhere). Never stores secrets: pasted keys are echoed straight back
- * into a copy-pasteable export line, never persisted by VerifyFlow.
+ * Windows, POSIX shell elsewhere). When the user pastes a Linear API key, onboard persists it
+ * to ~/.verifyflow/credentials.json (0600) so subsequent `vf run` invocations resolve it
+ * automatically — no environment-variable juggling required.
  */
 
 export type OnboardStatus = "ok" | "fix" | "warn" | "info";
@@ -42,6 +44,14 @@ export interface OnboardDeps {
   detectRepo?: () => Promise<string | undefined>;
   /** Detect open PR number for the current branch. Defaults to running `gh pr view`. */
   detectPr?: () => Promise<number | undefined>;
+  /** Persist credentials. Defaults to writing ~/.verifyflow/credentials.json. Injectable for tests. */
+  saveCredentials?: (creds: Credentials) => Promise<string>;
+}
+
+async function defaultSaveCredentials(creds: Credentials): Promise<string> {
+  const p = getCredentialsPath();
+  await writeCredentials(creds, p);
+  return p;
 }
 
 function setEnvCommand(platform: NodeJS.Platform, name: string, value: string): string[] {
@@ -82,6 +92,7 @@ export async function runOnboard(deps: OnboardDeps = {}): Promise<OnboardReport>
   const ghAuthed = deps.ghAuthed ?? defaultGhAuthed;
   const detectRepo = deps.detectRepo ?? defaultDetectRepo;
   const detectPr = deps.detectPr ?? defaultDetectPr;
+  const saveCredentials = deps.saveCredentials ?? defaultSaveCredentials;
   const report = await doctor();
   const steps: OnboardStep[] = [];
 
@@ -136,35 +147,66 @@ export async function runOnboard(deps: OnboardDeps = {}): Promise<OnboardReport>
     steps.push(repoStep);
   }
 
-  // LINEAR_API_KEY: the FAIL most newcomers hit. Interactive flow inlines the pasted value into
-  // a ready-to-run command; non-interactive uses a placeholder so the output still works in CI.
+  // LINEAR_API_KEY: the FAIL most newcomers hit. Interactive flow saves the pasted key to
+  // ~/.verifyflow/credentials.json so vf can resolve it from then on — no shell-env juggling
+  // needed. Non-interactive (or skipped) prints the placeholder env-setting commands so the
+  // output still works in CI.
   const linear = findCheck((n) => n === "LINEAR_API_KEY");
   if (linear && !linear.ok) {
-    const lines: string[] = [
-      "Generate a personal API key in Linear: Settings → Account → Security & access → Personal API keys.",
-    ];
     let pasted: string | undefined;
     if (deps.prompt) {
       const answer = (
         await deps.prompt(
-          "Paste your Linear API key to get a ready-to-run command (or press Enter to skip): ",
+          "Paste your Linear API key to save it to ~/.verifyflow/credentials.json (or press Enter to skip): ",
         )
       ).trim();
       if (answer) pasted = answer;
     }
-    const value = pasted ?? "<your-linear-api-key>";
-    lines.push("");
-    lines.push(...setEnvCommand(platform, "LINEAR_API_KEY", value));
-    if (!pasted) {
-      lines.push("");
-      lines.push(
-        "Replace <your-linear-api-key> with the value before running. " +
-          "For offline runs you can skip this entirely and pass `--fixtures <dir>`.",
-      );
+
+    if (pasted) {
+      // Persist directly — child processes can't mutate the parent shell's env, but they CAN
+      // own a config file. From now on `resolveLinearApiKey()` will find this key.
+      let savedAt: string | undefined;
+      let saveError: string | undefined;
+      try {
+        savedAt = await saveCredentials({ linearApiKey: pasted });
+      } catch (e) {
+        saveError = (e as Error).message;
+      }
+      if (savedAt) {
+        steps.push({
+          name: "LINEAR_API_KEY",
+          status: "ok",
+          detail: `saved to ${savedAt}`,
+          instructions: [
+            "VerifyFlow now resolves the key from this file (no shell env var needed).",
+            "To override per-shell, you can still set LINEAR_API_KEY in your environment.",
+          ],
+        });
+      } else {
+        const lines: string[] = [
+          `Could not write credentials file: ${saveError ?? "unknown error"}`,
+          "Fallback — set the env var manually:",
+          "",
+          ...setEnvCommand(platform, "LINEAR_API_KEY", pasted),
+        ];
+        steps.push({ name: "LINEAR_API_KEY", status: "fix", detail: linear.detail, instructions: lines });
+      }
+    } else {
+      const lines: string[] = [
+        "Generate a personal API key in Linear: Settings → Account → Security & access → Personal API keys.",
+        "Then re-run `vf onboard` and paste it when prompted — it will be saved to ~/.verifyflow/credentials.json.",
+        "",
+        "Or set the env var manually:",
+        "",
+        ...setEnvCommand(platform, "LINEAR_API_KEY", "<your-linear-api-key>"),
+        "",
+        "For offline runs you can skip this entirely and pass `--fixtures <dir>`.",
+      ];
+      steps.push({ name: "LINEAR_API_KEY", status: "fix", detail: linear.detail, instructions: lines });
     }
-    steps.push({ name: "LINEAR_API_KEY", status: "fix", detail: linear.detail, instructions: lines });
   } else if (linear) {
-    steps.push({ name: "LINEAR_API_KEY", status: "ok", detail: "set", instructions: [] });
+    steps.push({ name: "LINEAR_API_KEY", status: "ok", detail: linear.detail, instructions: [] });
   }
 
   // claude — optional but recommended: without it VerifyFlow uses the rules-only fallback backend.
