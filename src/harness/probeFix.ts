@@ -36,7 +36,7 @@ export async function regenerateProbe(opts: {
 
   let raw: string;
   try {
-    raw = await opts.llm.complete({ system, prompt, task: "probe-repair" });
+    raw = await opts.llm.complete({ system, prompt, task: "probe-repair", tier: "smart" });
   } catch {
     return undefined;
   }

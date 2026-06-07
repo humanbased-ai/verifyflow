@@ -200,7 +200,7 @@ export class AgenticUiHarness implements UiHarness {
 
     let raw: string;
     try {
-      raw = await this.o.llm.complete({ system: SYSTEM, prompt, task: `ui-check:${check.criterionId}` });
+      raw = await this.o.llm.complete({ system: SYSTEM, prompt, task: `ui-check:${check.criterionId}`, tier: "smart" });
     } catch {
       return undefined;
     }

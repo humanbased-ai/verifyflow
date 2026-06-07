@@ -312,7 +312,7 @@ export class AgenticJourneyHarness implements JourneyHarness {
 
     let raw: string;
     try {
-      raw = await this.o.llm.complete({ system: SYSTEM, prompt, task: `journey-check:${check.criterionId}` });
+      raw = await this.o.llm.complete({ system: SYSTEM, prompt, task: `journey-check:${check.criterionId}`, tier: "smart" });
     } catch {
       return undefined;
     }
