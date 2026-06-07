@@ -8,8 +8,8 @@ const run = promisify(execFile);
 
 async function cli(...args: string[]): Promise<{ stdout: string; code: number }> {
   try {
-    // `npx tsx` resolves tsx from the project's node_modules (no global install assumed).
-    const { stdout } = await run("npx", ["tsx", "src/cli/main.ts", ...args], {
+    // Match scripts/run-tests.mjs: `node --import tsx` avoids the tsx CLI's IPC server.
+    const { stdout } = await run(process.execPath, ["--import", "tsx", "src/cli/main.ts", ...args], {
       cwd: process.cwd(),
     });
     return { stdout, code: 0 };
