@@ -15,11 +15,15 @@ import type { PlanStep } from "../types.js";
 import type { RepoConfig } from "../core/planner/repoConfig.js";
 
 const cfg: RepoConfig = { setup: [], test: "", testForFiles: () => undefined, source: "test" };
+// Use Node to produce a portable "cannot find module" harness error — POSIX shells say
+// "command not found", Windows cmd.exe says "is not recognized", and non-English Windows
+// locales mangle the message. `node <missing-script>` errors with the same English
+// "Cannot find module" line on every platform.
 const step: PlanStep = {
   id: "probe-AC-1",
   kind: "command",
   description: "probe",
-  command: "definitely-not-a-real-binary-zzz", // → "command not found", a harness error
+  command: "node /tmp/verifyflow-definitely-not-a-real-script-zzz.mjs",
   criterionIds: ["AC-1"],
   reusedTestPoint: false,
 };

@@ -329,6 +329,81 @@
       font-size: 12px;
       border-top: 1px solid #21262d;
     }
+
+    .pre-block {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      font-size: 12.5px;
+      color: #e6edf3;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      margin: 8px 0;
+    }
+
+    .pre-block .c  { color: #484f58; }
+    .pre-block .k  { color: #79c0ff; }
+    .pre-block .s  { color: #a5d6ff; }
+    .pre-block .g  { color: #3fb950; }
+    .pre-block .r  { color: #f85149; }
+    .pre-block .o  { color: #d29922; }
+
+    .case-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 760px) {
+      .case-grid { grid-template-columns: 1fr; }
+    }
+
+    .case-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+
+    .case-card.bad  { border-color: #5a1a1a; }
+    .case-card.good { border-color: #1b4332; }
+
+    .case-card h3 {
+      font-size: 14px;
+      color: #f0f6fc;
+      margin-bottom: 4px;
+    }
+
+    .case-card .head {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+
+    .case-card.bad  .head { color: #f85149; }
+    .case-card.good .head { color: #3fb950; }
+
+    .case-card p {
+      font-size: 13px;
+      color: #8b949e;
+      margin: 6px 0;
+    }
+
+    .callout {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-left: 3px solid #d29922;
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #c9d1d9;
+      font-size: 13px;
+      margin: 12px 0;
+    }
+    .callout strong { color: #f0f6fc; }
   </style>
 </head>
 <body>
@@ -547,6 +622,80 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- 实跑案例 -->
+  <div class="section">
+    <div class="section-title">实跑案例 — PR #60 / IN-737（端到端实测）</div>
+    <p class="scenario-note" style="margin-left:0; margin-bottom:12px;">
+      给 verifyflow 自己加 <span class="inline-code">--version</span> 标志，Linear issue 写了 3 条带可执行命令的 AC，跑两次：第一次踩了 Windows shell 的坑（已修），第二次拿到 accept。这是真实输出，不是示意。
+    </p>
+
+    <div class="case-grid">
+
+      <div class="case-card bad">
+        <div class="head">❌ 第一次跑（修 bug 前）</div>
+        <h3>setup 步骤挂在 spawn sh ENOENT</h3>
+        <p>Windows PowerShell 没有 sh，setup 直接挂，3 个 probe 一个都没跑到，verdict 自动降级为 <code>manual_review_required</code>。</p>
+        <div class="pre-block"><span class="g">$</span> vf run --pr humanbased-ai/verifyflow#60 --checkout
+
+[verifyflow] checking out humanbased-ai/verifyflow#60@70f1a79 ...
+[verifyflow] extracted 3 acceptance criteria
+[verifyflow] running: environment setup: npm ci || npm install
+[verifyflow] verdict: <span class="o">manual_review_required</span>
+
+  AC-1   <span class="o">⊘ blocked</span>      0.50  `npm run vf -- --version` ...
+  AC-2   <span class="o">⊘ blocked</span>      0.50  The short form `npm run vf -- -v` ...
+  AC-3   <span class="o">⊘ blocked</span>      0.50  Existing behavior is preserved ...
+
+  Verdict: <span class="o">manual_review_required</span>   (0 pass, 3 blocked/not_evaluable)</div>
+        <p style="margin-top:10px;">看 <code>artifacts/setup-1.log</code>：</p>
+        <div class="pre-block"><span class="c">$ npm ci || npm install
+(exit: null, executed: false, <span class="r">spawnError: spawn sh ENOENT</span>)</span></div>
+      </div>
+
+      <div class="case-card good">
+        <div class="head">✅ 第二次跑（修完之后）</div>
+        <h3>3 个 probe 实际执行 → accept</h3>
+        <p>commandRunner 改用 <code>shell: true</code>（POSIX 走 /bin/sh，Windows 走 cmd.exe），setup 通过，probe 全跑，verdict = <code>accept</code>。</p>
+        <div class="pre-block"><span class="g">$</span> vf run --pr humanbased-ai/verifyflow#60 --checkout
+
+[verifyflow] extracted 3 acceptance criteria
+[verifyflow] planned 4 steps — level functional
+[verifyflow] running: environment setup: npm ci || npm install
+[verifyflow] verdict: <span class="g">accept</span>
+
+  AC-1   <span class="g">✓ pass</span>          0.92  `npm run vf -- --version` ...
+  AC-2   <span class="g">✓ pass</span>          0.92  The short form `npm run vf -- -v` ...
+  AC-3   <span class="g">✓ pass</span>          0.92  Existing behavior is preserved ...
+
+  Verdict: <span class="g">accept</span>   (3 pass)</div>
+        <p style="margin-top:10px;">看 <code>artifacts/probe-AC-1.log</code>：</p>
+        <div class="pre-block"><span class="c">$ npm run vf -- --version
+(exit: 0, executed: true)
+----------------</span>
+<span class="g">verifyflow 0.1.0</span></div>
+      </div>
+
+    </div>
+
+    <div class="callout">
+      <strong>怎么读 verdict：</strong>
+      <code>accept</code> = 全过；
+      <code>needs_fix</code> = 至少一条 probe 跑过但失败；
+      <code>manual_review_required</code> = 验证不动了（环境炸 / 没 ticket / probe 不可观测）——这次卡在 setup 上就是这一档；
+      <code>accept_with_risks</code> = 主路径过了但有副作用警告。
+    </div>
+
+    <div class="callout">
+      <strong>blocked vs fail：</strong>
+      <code>blocked</code> 表示 probe 根本没跑到（环境问题），<strong>不算 PR 不合格</strong>——vf 诚实承认"我没验证到"。
+      <code>fail</code> 才是"probe 跑了，PR 没满足这条 AC"。Verdict 引擎会把 blocked 计入 manual_review，不会冤枉 PR。
+    </div>
+
+    <p class="scenario-note" style="margin-left:0;">
+      复现：拉 main、装好 npm link，<code>vf onboard</code> 粘 Linear key，然后跑右栏那条命令。源 issue：<a href="https://linear.app/inductive-network/issue/IN-737/verifyflow-test-add-vf-version-flag" style="color:#58a6ff;">IN-737</a>，PR：<a href="https://github.com/humanbased-ai/verifyflow/pull/60" style="color:#58a6ff;">humanbased-ai/verifyflow#60</a>。
+    </p>
   </div>
 
   <!-- vf run -->

@@ -70,10 +70,14 @@ export class CommandRunner {
       .then((s) => s.isDirectory())
       .catch(() => false);
     if (!cwdExists) cwd = path.resolve(this.workdir);
-    const res = await run("sh", ["-c", step.command], {
+    // Use the platform's default shell (cmd.exe on Windows, /bin/sh elsewhere) so command
+    // lines with shell operators like `npm ci || npm install` work everywhere. Previously we
+    // hardcoded `sh -c`, which failed with `spawn sh ENOENT` on stock Windows PowerShell.
+    const res = await run(step.command, [], {
       cwd,
       timeoutMs: this.timeoutFor(step.id),
       env: sanitizeEnv(process.env, this.isolate),
+      shell: true,
     });
 
     await fs.mkdir(this.artifactRoot, { recursive: true });
