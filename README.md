@@ -18,6 +18,31 @@ The command is `verifyflow`, aliased to `vf`.
 
 ---
 
+## Quickstart — 3 steps
+
+The shortest path for someone trying VerifyFlow for the first time:
+
+```bash
+# 1. Check your toolchain (Node ≥ 20, gh, claude, LINEAR_API_KEY)
+npx github:humanbased-ai/verifyflow doctor
+
+# 2. Guided first-run setup — interactive wizard fills the rest in
+npx github:humanbased-ai/verifyflow onboard
+
+# 3. Verify a real PR
+npx github:humanbased-ai/verifyflow run \
+  --linear IN-318 \
+  --pr https://github.com/acme/app/pull/69 \
+  --level auto \
+  --checkout --comment
+```
+
+`onboard` is the friendliest entry point — it walks new users through tool
+checks, credentials, and a first verification run. The sections below cover
+the full install and option surface.
+
+---
+
 ## Where it fits
 
 VerifyFlow is the last gate in the HumanBased delivery chain:
