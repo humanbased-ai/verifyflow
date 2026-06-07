@@ -267,3 +267,32 @@ function kFilter(isPytest: boolean, keywords?: string[]): string {
   if (!isPytest || !keywords || keywords.length === 0) return "";
   return ` -k "${keywords.join(" or ")}"`;
 }
+
+/**
+ * Detect the repo ecosystem and return a `VerifyflowFileConfig`-compatible scaffold for
+ * `vf init`. Returns undefined when no recognized ecosystem is found (caller uses a generic
+ * template). The `source` field names what was detected (e.g. "inferred-python-uv").
+ */
+export async function inferEcosystem(
+  workdir: string,
+): Promise<{ config: Required<VerifyflowFileConfig>; source: string } | undefined> {
+  const cfg = await infer(workdir);
+  if (!cfg) return undefined;
+
+  // Derive `testGlobPrefix` from the config: for pytest it's the base pytest command;
+  // for node it's the scoped runner prefix. When not applicable, omit (empty string).
+  const testGlobPrefix = cfg.runPrefix
+    ? cfg.test // pytest with a run prefix → the whole test command is the glob prefix
+    : ""; // node runners use scopedTestFor; testGlobPrefix is not meaningful
+
+  return {
+    source: cfg.source,
+    config: {
+      "//": `VerifyFlow per-repo config — auto-detected: ${cfg.source}. Commands run inside the PR checkout.`,
+      setup: cfg.setup,
+      test: cfg.test,
+      runPrefix: cfg.runPrefix ?? "",
+      testGlobPrefix,
+    },
+  };
+}
