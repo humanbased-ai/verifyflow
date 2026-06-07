@@ -305,15 +305,33 @@
   <div class="hero">
     <h1>Linear issue 写不写验收条件，工具表现差多少？</h1>
     <p>同一个 PR，同一份代码，只改 Linear issue 描述的"颗粒度"——看 VerifyFlow 提取出多少标准、能不能跑、verdict 能到哪一档。</p>
-    <div class="badge">vf run --dry-run --fixtures &lt;dir&gt;</div>
+    <div class="badge">git clone &amp;&amp; npm install &amp;&amp; npm run vf</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">复现步骤（克隆即可跑）</div>
+    <h2>三个 fixture 已随仓库提交</h2>
+    <p class="lede">
+      仓库根目录执行以下命令，三组对照输出可一键复现，无需 Linear/GitHub 凭证。
+    </p>
+
+    <div class="pre-block"><span class="c"># 1. 准备环境（一次性）</span>
+git clone git@github.com:humanbased-ai/verifyflow.git
+cd verifyflow
+npm install
+
+<span class="c"># 2. 跑三组 dry-run（同一 PR，三种 issue 写法）</span>
+<span class="g">npm run vf --</span> run --dry-run --fixtures <span class="s">fixtures/example-cli</span>               --pr owner/repo#7   <span class="c"># A · 有 AC 段</span>
+<span class="g">npm run vf --</span> run --dry-run --fixtures <span class="s">fixtures/example-cli-summary-only</span>  --pr owner/repo#7   <span class="c"># B · 只有 Summary</span>
+<span class="g">npm run vf --</span> run --dry-run --fixtures <span class="s">fixtures/example-cli-vague</span>         --pr owner/repo#7   <span class="c"># C · 完全模糊</span></div>
   </div>
 
   <div class="section">
     <div class="section-title">实验设定</div>
     <h2>变量只有一个：issue 描述</h2>
     <p class="lede">
-      复用 <span class="inline-code">fixtures/example-cli</span>：同一份 PR（example/greet#7，"加 --version 标志"），同一份目标代码。
-      仅把 <span class="inline-code">issue.json</span> 的 <span class="inline-code">description</span> 改成三种写法，跑 <span class="inline-code">vf run --dry-run</span> 看工具实际解析出什么。
+      复用 <span class="inline-code">fixtures/example-cli</span> 的 <span class="inline-code">pr.json</span>（同一个 PR、同一份目标代码），
+      仅把 <span class="inline-code">issue.json</span> 的 <span class="inline-code">description</span> 改成三种写法。三个 fixture 目录都已提交到仓库。
     </p>
   </div>
 
@@ -360,6 +378,9 @@
     <h2>带 <code>## Acceptance Criteria</code> 段，命令用反引号包起来</h2>
     <p class="lede">工具直接把每条标准变成一个独立 probe，命令可以照搬运行。</p>
 
+    <div class="pre-block"><span class="c">// 复现命令</span>
+<span class="g">npm run vf --</span> run --dry-run --fixtures <span class="s">fixtures/example-cli</span> --pr owner/repo#7</div>
+
     <div class="pre-block"><span class="c">// issue.description</span>
 ## Summary
 
@@ -390,6 +411,9 @@ know which build they run.
     <h2>只保留概述，没有显式 AC 段</h2>
     <p class="lede">工具退而求其次，从描述里硬找一句包含命令模样的话当 probe——结果不一定靠谱。</p>
 
+    <div class="pre-block"><span class="c">// 复现命令</span>
+<span class="g">npm run vf --</span> run --dry-run --fixtures <span class="s">fixtures/example-cli-summary-only</span> --pr owner/repo#7</div>
+
     <div class="pre-block"><span class="c">// issue.description</span>
 ## Summary
 
@@ -412,6 +436,9 @@ know which build they run.</div>
     <div class="section-title">C · 完全模糊 — issue 与解析结果</div>
     <h2>没有任何技术细节</h2>
     <p class="lede">工具走最后兜底：把标题/首句当占位标准，并显式记录"ticket 质量不达标"。</p>
+
+    <div class="pre-block"><span class="c">// 复现命令</span>
+<span class="g">npm run vf --</span> run --dry-run --fixtures <span class="s">fixtures/example-cli-vague</span> --pr owner/repo#7</div>
 
     <div class="pre-block"><span class="c">// issue.description</span>
 Users have been asking for this. Let's add it.</div>
