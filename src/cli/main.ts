@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
+import os from "node:os";
+import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { runVerification, planRun, type PipelineDeps, type PlanPreview } from "../core/pipeline.js";
 import type { Level, Policy, RunRequest } from "../types.js";
@@ -74,6 +76,8 @@ Usage:
   vf onboard [--non-interactive]      Guided first-run setup: prints platform-specific fix commands
                                       for any missing prerequisite, with an optional interactive
                                       prompt for LINEAR_API_KEY. Stores no secrets.
+  vf demo [--open]                    Offline demo — no credentials. Runs bundled fixtures and writes
+                                      a report you can read.
   vf watch  --repo <owner/repo> [--auto-merge] [--interval <s>] [--level <l>]
                                       Independent daemon: watch the repo's Crosscheck-approved PRs,
                                       verify delivery, and (with --auto-merge) squash-merge on accept.
@@ -876,6 +880,53 @@ async function cmdWatch(args: Args): Promise<number> {
   return 0;
 }
 
+/**
+ * `vf demo` (IN-692): zero-credential offline demo. Runs the bundled fixture data through
+ * the full verification pipeline without hitting any external API or requiring a claude CLI.
+ * Writes a report to a temp directory and prints a concise summary to stdout.
+ */
+async function cmdDemo(args: Args): Promise<number> {
+  // Resolve fixture paths relative to this file's package root.
+  // At runtime the compiled file lives at dist/cli/main.js, so the package root is two levels up.
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const PKG_ROOT = path.resolve(__dirname, "..", "..");
+  const fixturesDir = path.join(PKG_ROOT, "fixtures", "example-cli");
+  const workdir = path.join(PKG_ROOT, "fixtures", "example-target");
+  const tempDir = path.join(os.tmpdir(), `verifyflow-demo-${Date.now()}`);
+
+  console.error("[verifyflow] Running offline demo — no credentials needed...");
+
+  const demoArgs: Args = {
+    fixtures: fixturesDir,
+    linear: "EX-1",
+    pr: "example/greet#7",
+    level: "functional",
+    out: tempDir,
+    workdir: workdir,
+  };
+
+  const outcome = await executeRun(demoArgs);
+  if (typeof outcome === "number") return outcome;
+
+  const { report, reportPaths } = outcome;
+  const criteriaCount = report.criterionResults.length;
+
+  console.log(`verdict:    ${report.runVerdict}`);
+  console.log(`criteria:   ${criteriaCount} evaluated`);
+  console.log(`report:     ${reportPaths.markdownPath}`);
+
+  if (args.open) {
+    const openCmd =
+      process.platform === "darwin" ? "open" :
+      process.platform === "win32" ? "start" :
+      "xdg-open";
+    const { spawn } = await import("node:child_process");
+    spawn(openCmd, [reportPaths.markdownPath], { detached: true, stdio: "ignore" }).unref();
+  }
+
+  return 0;
+}
+
 async function main(): Promise<number> {
   const { cmd, args, positionals } = parseArgs(process.argv.slice(2));
   // `help`, `--help`/`-h` as the first token, or any `--help`/`-h` flag → usage (exit 0).
@@ -894,6 +945,7 @@ async function main(): Promise<number> {
   if (cmd === "init") return cmdInit(args);
   if (cmd === "doctor") return cmdDoctor();
   if (cmd === "onboard") return cmdOnboard(args);
+  if (cmd === "demo") return cmdDemo(args);
   if (cmd === "watch") return cmdWatch(args);
   console.error(`error: unknown command "${cmd}"\n`);
   console.log(USAGE);
