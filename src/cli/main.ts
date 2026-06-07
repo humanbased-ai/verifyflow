@@ -619,8 +619,9 @@ async function cmdInit(args: Args): Promise<number> {
   const dir = str(args.dir) ? path.resolve(str(args.dir)!) : process.cwd();
   const res = await runInit(dir);
   if (res.created) {
-    console.log(`created ${res.path}`);
-    console.log("Edit it for your stack (setup / test / runPrefix), then run: vf run --help");
+    const detection = res.detected ? ` (detected: ${res.detected})` : " (generic template — edit for your stack)";
+    console.log(`created ${res.path}${detection}`);
+    if (!res.detected) console.log("Edit setup / test / runPrefix for your stack, then run: vf run --help");
   } else {
     console.log(`${res.path} ${res.reason}`);
   }
