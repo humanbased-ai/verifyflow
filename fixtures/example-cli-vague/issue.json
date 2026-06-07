@@ -1,0 +1,8 @@
+{
+  "key": "EX-1",
+  "title": "Add --version flag to the greet CLI",
+  "description": "Users have been asking for this. Let's add it.",
+  "url": "https://linear.app/example/issue/EX-1/add-version-flag",
+  "status": "In Review",
+  "source": "fixture"
+}
