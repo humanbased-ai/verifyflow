@@ -45,8 +45,9 @@ import {
   ghListIssueComments,
   ghMergePr,
   type WatchDeps,
+  type WatchObserver,
 } from "./watch.js";
-import { green, red, yellow, cyan, dim, colorizeVerdict } from "../util/color.js";
+import { green, red, yellow, cyan, dim, bold, colorizeVerdict } from "../util/color.js";
 
 const RESULT_LABEL: Record<string, string> = {
   pass: "✓ pass",
@@ -244,7 +245,10 @@ interface RunOutcome {
  * PR-comment / Linear write-backs. Writes only to stderr — stdout is owned by the caller
  * (markdown for `run`, a single JSON line for `step`).
  */
-async function executeRun(args: Args): Promise<RunOutcome | number> {
+async function executeRun(
+  args: Args,
+  opts: { onProgress?: (msg: string) => void } = {},
+): Promise<RunOutcome | number> {
   const pr = str(args.pr);
   const level = (str(args.level) ?? "functional") as Level | "auto";
   if (!pr) {
@@ -394,7 +398,9 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     eventLog: new EventLog(outputRoot),
     uiHarnessFactory,
     journeyHarnessFactory,
-    onProgress: (msg) => console.error(`${dim("[verifyflow]")} ${msg}`),
+    // Default progress sink prefixes with the [verifyflow] tag; callers (e.g. vf watch) can
+    // override to attach per-PR context.
+    onProgress: opts.onProgress ?? ((msg) => console.error(`${dim("[verifyflow]")} ${msg}`)),
   };
 
   if (!request.workdir) {
@@ -907,7 +913,11 @@ async function cmdWatch(args: Args): Promise<number> {
     listOpenPrs: ghListOpenPrs,
     listIssueComments: ghListIssueComments,
     verify: async (pr) => {
-      const outcome = await executeRun({ pr: `${repo}#${pr.number}`, level, checkout: true, comment: true });
+      const outcome = await executeRun(
+        { pr: `${repo}#${pr.number}`, level, checkout: true, comment: true },
+        // Attach the PR to each pipeline progress step so a watcher can tell which PR it belongs to.
+        { onProgress: (msg) => console.error(`  ${cyan(`#${pr.number}`)} ${dim(msg)}`) },
+      );
       if (typeof outcome === "number") return { verdict: "error", merged: false };
       const verdict = outcome.report.runVerdict;
       let merged = false;
@@ -916,29 +926,50 @@ async function cmdWatch(args: Args): Promise<number> {
     },
   };
 
+  // Per-tick heartbeat + per-PR start framing. Pure observability — never touches the decision core.
+  const observer: WatchObserver = {
+    tick: ({ open, alreadyVerified, toVerify }) => {
+      const summary =
+        `${open} open · ${alreadyVerified} already verified · ${toVerify} approved & pending`;
+      console.error(
+        toVerify > 0
+          ? `${dim("[verifyflow] tick:")} ${summary}`
+          : dim(`[verifyflow] tick: ${summary} — nothing to do`),
+      );
+    },
+    verifyStart: (pr) => {
+      const title = pr.title ? ` ${dim(`"${pr.title}"`)}` : "";
+      console.error(`${bold("▶")} verifying ${cyan(`PR #${pr.number}`)}${title}`);
+    },
+  };
+
   console.error(
-    `[verifyflow] vf watch on ${repo} — every ${intervalMs / 1000}s, auto-merge: ${autoMerge} (Ctrl-C to stop).`,
+    `${dim("[verifyflow]")} vf watch on ${cyan(repo)} — every ${intervalMs / 1000}s, ` +
+      `auto-merge: ${autoMerge ? green("on") : dim("off")} ${dim("(Ctrl-C to stop).")}`,
   );
   let stop = false;
   const onStop = () => {
     stop = true;
-    console.error("\n[verifyflow] stopping watch after the current tick…");
+    console.error(dim("\n[verifyflow] stopping watch after the current tick…"));
   };
   process.once("SIGINT", onStop);
   process.once("SIGTERM", onStop); // containers / systemd / kill use SIGTERM
   while (!stop) {
     try {
-      const acted = await watchTick(repo, deps, seen);
+      const acted = await watchTick(repo, deps, seen, observer);
       for (const a of acted) {
-        const merged = a.merged ? green("merged=true") : dim("merged=false");
+        // Outcome framing: ✔ for a merge, ✘ for an error, • otherwise. The PR title was already
+        // shown by verifyStart, so the outcome line stays compact.
+        const mergedNote = a.merged ? green(" (merged)") : "";
+        const icon = a.error ? red("✘") : a.merged ? green("✔") : dim("•");
         console.error(
-          `${dim("[verifyflow]")} ${cyan(`PR #${a.pr}`)}${dim(`@${a.headSha.slice(0, 8)}`)}: ` +
-            `verdict=${colorizeVerdict(a.verdict)} ${merged}` +
-            (a.error ? ` ${red(`error=${a.error}`)}` : ""),
+          `${icon} ${cyan(`PR #${a.pr}`)}${dim(`@${a.headSha.slice(0, 8)}`)} → ` +
+            `${colorizeVerdict(a.verdict)}${mergedNote}` +
+            (a.error ? ` ${red(a.error)}` : ""),
         );
       }
     } catch (err) {
-      console.error(`[verifyflow] watch tick error: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`${red("[verifyflow] watch tick error:")} ${err instanceof Error ? err.message : String(err)}`);
     }
     if (stop) break;
     await sleep(intervalMs);
