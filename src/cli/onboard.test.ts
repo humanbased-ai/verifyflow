@@ -3,6 +3,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runOnboard, renderOnboardReport } from "./onboard.js";
 import type { DoctorReport } from "./doctor.js";
+import { refreshColor } from "../util/color.js";
+
+// Disable color: these tests string-match the rendered badges (e.g. `[FIX ] LINEAR_API_KEY`), and
+// the test runner inherits the terminal's stdio, so color must not be left to ambient TTY state.
+refreshColor({ NO_COLOR: "1" });
 
 /** A doctor report fixture where every check reports `ok` if true, FAIL/WARN with given detail otherwise. */
 function fakeDoctor(opts: {

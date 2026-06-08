@@ -1,5 +1,6 @@
 import { hasBinary } from "../util/exec.js";
 import { resolveLinearApiKey } from "./credentials.js";
+import { green, red, yellow, dim } from "../util/color.js";
 
 /**
  * `vf doctor` (IN-611): report whether the CLIs and env VerifyFlow relies on are present, so a
@@ -104,14 +105,18 @@ export async function runDoctor(deps: DoctorDeps = {}): Promise<DoctorReport> {
 /** Render a doctor report as human-readable lines for the CLI. */
 export function renderDoctorReport(report: DoctorReport): string {
   const lines = report.checks.map((c) => {
-    const mark = (c.ok ? "ok" : c.required ? "FAIL" : "WARN").padEnd(4);
-    return `  [${mark}] ${c.name}: ${c.detail}`;
+    const word = c.ok ? "ok" : c.required ? "FAIL" : "WARN";
+    const paint = c.ok ? green : c.required ? red : yellow;
+    // Color only the status word; keep the surrounding brackets/padding intact so the columns
+    // still line up. Color is a no-op when disabled (non-TTY/NO_COLOR), so plain text is unchanged.
+    const mark = `[${paint(word)}${" ".repeat(4 - word.length)}]`;
+    return `  ${mark} ${c.name}: ${dim(c.detail)}`;
   });
   lines.push("");
   lines.push(
     report.ok
-      ? "doctor: all required tools are ready."
-      : "doctor: missing required tools (see FAIL above). Run `vf onboard` for a guided fix.",
+      ? green("doctor: all required tools are ready.")
+      : red("doctor: missing required tools (see FAIL above). Run `vf onboard` for a guided fix."),
   );
   return lines.join("\n");
 }

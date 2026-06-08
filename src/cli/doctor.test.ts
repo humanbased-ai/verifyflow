@@ -2,6 +2,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runDoctor, renderDoctorReport } from "./doctor.js";
+import { refreshColor } from "../util/color.js";
+
+// These tests string-match the rendered badges (e.g. `[FAIL] gh`). Color would insert ANSI codes
+// between the brackets and the word, so disable it deterministically — the test runner inherits
+// the terminal's stdio, so ambient TTY state cannot be relied on to keep output plain.
+refreshColor({ NO_COLOR: "1" });
 
 const allPresent = async (_n: string) => true;
 const nonePresent = async (_n: string) => false;
