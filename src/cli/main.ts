@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import os from "node:os";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { runVerification, planRun, type PipelineDeps, type PlanPreview } from "../core/pipeline.js";
@@ -173,6 +174,7 @@ Options:
                          the PR's own description; verdict capped at manual_review_required.
   --dry-run              (run) Resolve criteria + build the plan and print it, without executing.
   -h, --help             Show this help.
+  -v, --version          Print the verifyflow version and exit.
 
 Auth model: VerifyFlow stores no secrets. It uses the authorized CLIs you have installed —
   gh (GitHub), claude (LLM), git/uv (execution). Linear: set LINEAR_API_KEY or use --fixtures.
@@ -1180,7 +1182,7 @@ async function main(): Promise<number> {
     // Resolve package.json relative to this module: src/cli/main.ts → ../../package.json
     // (and dist/cli/main.js → ../../package.json), so both run modes work.
     const pkgPath = path.resolve(here, "..", "..", "package.json");
-    const pkg = JSON.parse(await (await import("node:fs/promises")).readFile(pkgPath, "utf8")) as { version: string };
+    const pkg = JSON.parse(await readFile(pkgPath, "utf8")) as { version: string };
     console.log(`verifyflow ${pkg.version}`);
     return 0;
   }
