@@ -54,6 +54,34 @@ test("node with an undetectable runner emits NO scoped command (no wrong-runner 
   assert.equal(cfg.testForFiles(["src/a.test.ts"]), undefined);
 });
 
+test("pnpm workspace without a root test script uses recursive workspace test (monorepo, no false fail) (IN-790)", async () => {
+  const cfg = await loadRepoConfig(
+    await repoWith({ "package.json": "{}", "pnpm-lock.yaml": "", "pnpm-workspace.yaml": "packages:\n  - 'packages/*'\n" }),
+  );
+  assert.equal(cfg.source, "inferred-node-pnpm");
+  assert.equal(cfg.test, "pnpm -r --if-present test");
+});
+
+test("pnpm NON-workspace without a root test script keeps the direct command (honest missing-test, not a silent pass) (IN-790)", async () => {
+  const cfg = await loadRepoConfig(await repoWith({ "package.json": "{}", "pnpm-lock.yaml": "" }));
+  assert.equal(cfg.source, "inferred-node-pnpm");
+  assert.equal(cfg.test, "pnpm test");
+});
+
+test("pnpm WITH a root test script keeps the direct command (IN-790)", async () => {
+  const pkg = JSON.stringify({ scripts: { test: "vitest run" }, devDependencies: { vitest: "^1" } });
+  const cfg = await loadRepoConfig(await repoWith({ "package.json": pkg, "pnpm-lock.yaml": "" }));
+  assert.equal(cfg.source, "inferred-node-pnpm");
+  assert.equal(cfg.test, "pnpm test");
+});
+
+test("npm workspace without a root test script uses --workspaces --if-present (IN-790)", async () => {
+  const pkg = JSON.stringify({ workspaces: ["packages/*"] });
+  const cfg = await loadRepoConfig(await repoWith({ "package.json": pkg }));
+  assert.equal(cfg.source, "inferred-node");
+  assert.equal(cfg.test, "npm test --workspaces --if-present");
+});
+
 test("go is detected from go.mod and scopes tests to changed dirs", async () => {
   const cfg = await loadRepoConfig(await repoWith({ "go.mod": "module x" }));
   assert.equal(cfg.source, "inferred-go");

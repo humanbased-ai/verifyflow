@@ -152,9 +152,12 @@ async function infer(workdir: string): Promise<RepoConfig | undefined> {
 
   // --- Node ---------------------------------------------------------------------------
   const pkg = parsePackageJson(await readText("package.json"));
-  if (await has("pnpm-lock.yaml")) return nodeConfig("pnpm", "inferred-node-pnpm", pkg);
-  if (await has("yarn.lock")) return nodeConfig("yarn", "inferred-node-yarn", pkg);
-  if (await has("package.json")) return nodeConfig("npm", "inferred-node", pkg);
+  // A workspace/monorepo signal: pnpm declares one in pnpm-workspace.yaml, npm/yarn via the
+  // package.json `workspaces` field. Tells nodeConfig that tests live in the packages, not the root.
+  const isWorkspace = Boolean(pkg.workspaces) || (await has("pnpm-workspace.yaml"));
+  if (await has("pnpm-lock.yaml")) return nodeConfig("pnpm", "inferred-node-pnpm", pkg, isWorkspace);
+  if (await has("yarn.lock")) return nodeConfig("yarn", "inferred-node-yarn", pkg, isWorkspace);
+  if (await has("package.json")) return nodeConfig("npm", "inferred-node", pkg, isWorkspace);
 
   // --- Other ecosystems ---------------------------------------------------------------
   if (await has("go.mod")) {
@@ -195,6 +198,7 @@ interface PackageJson {
   scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  workspaces?: string[] | { packages?: string[] };
 }
 
 function parsePackageJson(text: string): PackageJson {
@@ -227,12 +231,37 @@ function scopedTestFor(pkg: PackageJson, runner: string): (paths: string[]) => s
   return () => undefined; // unknown runner — don't guess a scoped command
 }
 
-function nodeConfig(pm: "npm" | "pnpm" | "yarn", source: string, pkg: PackageJson): RepoConfig {
+/**
+ * Base test command for a Node repo. Runs the root `test` script directly when one exists. When it
+ * does NOT and the repo is a workspace monorepo (tests live in the packages, not the root — e.g.
+ * humanbased-ai/monorepo, whose root scripts are build/typecheck only), `pnpm test` / `npm test`
+ * would error "no test specified" and be mis-scored as a product failure (IN-790); instead run each
+ * package's tests recursively, skipping packages that don't define one.
+ *
+ * A repo with no root `test` script that is NOT a workspace keeps the direct command — that
+ * surfaces the missing test entrypoint honestly rather than passing silently via `--if-present`.
+ */
+function nodeTestCommand(pm: "npm" | "pnpm" | "yarn", pkg: PackageJson, isWorkspace: boolean): string {
+  const direct = pm === "yarn" ? "yarn test" : `${pm} test`;
+  if (pkg.scripts?.test || !isWorkspace) return direct;
+  if (pm === "pnpm") return "pnpm -r --if-present test";
+  if (pm === "npm") return "npm test --workspaces --if-present";
+  // yarn's workspace-foreach syntax differs across v1/berry; keep the safe default rather than
+  // emit a command that errors on the wrong yarn version.
+  return direct;
+}
+
+function nodeConfig(
+  pm: "npm" | "pnpm" | "yarn",
+  source: string,
+  pkg: PackageJson,
+  isWorkspace: boolean,
+): RepoConfig {
   const install = pm === "npm" ? "npm ci || npm install" : pm === "pnpm" ? "pnpm install" : "yarn install";
   const runner = pm === "npm" ? "npx" : pm;
   return {
     setup: [install],
-    test: `${pm === "yarn" ? "yarn" : pm} test`,
+    test: nodeTestCommand(pm, pkg, isWorkspace),
     testForFiles: scopedTestFor(pkg, runner),
     source,
   };
