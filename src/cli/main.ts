@@ -38,6 +38,7 @@ import { runInit } from "./init.js";
 import { runDoctor, renderDoctorReport } from "./doctor.js";
 import { runOnboard, renderOnboardReport } from "./onboard.js";
 import { memoryLs, memoryShow, memoryClear, isValidRepoArg } from "./memory.js";
+import { recordFalsePositiveFromRun, feedbackLs, feedbackClear, listRecentRuns, latestRunForPr } from "./feedback.js";
 import { showRun, showSignal, isUnsafeRunId } from "./inspect.js";
 import {
   watchTick,
@@ -114,6 +115,15 @@ Usage:
   vf memory show <key>                Dump a single stored test point (by its id).
   vf memory clear [--repo <o/r>] [--yes]
                                       Prune the reusable test-point memory (one repo, or all).
+  vf feedback                         Interactive: pick a recent run + a not-passed criterion to
+                                      flag as a false positive (IN-792). Future runs downgrade a
+                                      matching criterion to blocked instead of re-flagging it.
+  vf feedback --pr <N> --criterion <id> [--note <text>]
+                                      Flag a criterion on the latest run for PR <N> (no run id
+                                      needed). Or name the run exactly: vf feedback <runId> --criterion <id>.
+  vf feedback ls                      List recorded false-positive feedback per repo.
+  vf feedback clear [--repo <o/r>] [--yes]
+                                      Prune recorded false-positive feedback (one repo, or all).
   vf replay <runId> [--out <dir>] [--json]
                                       Re-run the verdict engine against a past run's stored evidence
                                       — no probes/tests are executed.
@@ -775,6 +785,28 @@ async function cmdMemory(args: Args, positionals: string[]): Promise<number> {
   return 2;
 }
 
+/** Prompt for a single line on stdin (stderr-side, so stdout stays clean). undefined on non-tty/EOF. */
+async function promptLine(question: string): Promise<string | undefined> {
+  if (!process.stdin.isTTY) return undefined;
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return await rl.question(question);
+  } catch {
+    return undefined;
+  } finally {
+    rl.close();
+  }
+}
+
+/** Prompt for a 1-based menu choice; returns the 0-based index, or undefined on abort/invalid. */
+async function promptIndex(question: string, max: number): Promise<number | undefined> {
+  const ans = await promptLine(question);
+  if (ans === undefined) return undefined;
+  const n = Number(ans.trim());
+  if (!Number.isInteger(n) || n < 1 || n > max) return undefined;
+  return n - 1;
+}
+
 /** Prompt for a yes/no confirmation on stdin. Returns false on EOF / non-tty. */
 async function confirm(question: string): Promise<boolean> {
   // No interactive terminal (CI, piped stdin): don't block on `.question()` waiting for input that
@@ -791,6 +823,120 @@ async function confirm(question: string): Promise<boolean> {
   } finally {
     rl.close();
   }
+}
+
+/**
+ * `vf feedback` (IN-792): the human false-positive correction channel. Records a misjudged
+ * criterion so future runs downgrade it to `blocked` instead of re-flagging it.
+ */
+async function cmdFeedback(args: Args, positionals: string[]): Promise<number> {
+  const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
+  const store = new MemoryStore(outputRoot);
+  const sub = positionals[0] ?? "";
+
+  if (sub === "ls") {
+    const res = await feedbackLs(store);
+    console.log(args.json ? JSON.stringify(res.json, null, 2) : res.text);
+    return 0;
+  }
+  if (sub === "clear") {
+    const repo = str(args.repo);
+    if (repo !== undefined && !isValidRepoArg(repo)) {
+      console.error(`error: --repo must look like owner/repo (got "${repo}").`);
+      return 2;
+    }
+    if (!args.yes) {
+      const scope = repo ? `feedback for ${repo}` : "ALL false-positive feedback";
+      const ok = await confirm(`This will delete ${scope} under ${outputRoot}. Continue? [y/N] `);
+      if (!ok) {
+        console.error("aborted.");
+        return 0;
+      }
+    }
+    const res = await feedbackClear(store, repo);
+    console.log(res.text);
+    return 0;
+  }
+
+  // Three ways to name the run (most to least explicit): a positional <runId>, `--run <id>`, or
+  // `--pr <N>` (latest run for that PR — disambiguates when several PRs are in flight).
+  let runId = sub || str(args.run);
+  if (!runId && str(args.pr)) {
+    const prNum = Number(String(str(args.pr)).replace(/^#/, ""));
+    if (!Number.isInteger(prNum)) {
+      console.error("error: --pr must be a PR number.");
+      return 2;
+    }
+    runId = await latestRunForPr(outputRoot, prNum);
+    if (!runId) {
+      console.error(`feedback: no run found for PR #${prNum} under ${path.join(outputRoot, "runs")}.`);
+      return 1;
+    }
+  }
+  let criterionId = str(args.criterion);
+  let note = str(args.note);
+
+  // Interactive: nothing named → list recent runs and walk the user through it (TTY only).
+  if (!runId && !criterionId) {
+    if (!process.stdin.isTTY) {
+      console.error(
+        "error: vf feedback needs a TTY for interactive mode — or name the run with `--pr <N> --criterion <id>` " +
+          "or `<runId> --criterion <id>`. See `vf feedback ls`.",
+      );
+      return 2;
+    }
+    const runs = await listRecentRuns(outputRoot);
+    if (runs.length === 0) {
+      console.error(`feedback: no runs found under ${path.join(outputRoot, "runs")} — run \`vf run\` first.`);
+      return 1;
+    }
+    console.error("Recent runs:");
+    runs.forEach((r, i) => {
+      const fails = r.failed.length ? `${r.failed.length} not-passed` : "all passed";
+      console.error(`  ${i + 1}) PR #${r.prNumber} ${r.issue} — ${dim(fails)} ${dim(`(${r.runId})`)}`);
+    });
+    const ri = await promptIndex(`Pick a run [1-${runs.length}]: `, runs.length);
+    if (ri === undefined) {
+      console.error("aborted.");
+      return 0;
+    }
+    const chosen = runs[ri]!;
+    runId = chosen.runId;
+    if (chosen.failed.length === 0) {
+      console.error(`feedback: PR #${chosen.prNumber}'s run has no fail/partial criteria to flag.`);
+      return 1;
+    }
+    console.error(`\nNot-passed criteria for PR #${chosen.prNumber}:`);
+    chosen.failed.forEach((c, i) =>
+      console.error(`  ${i + 1}) ${cyan(c.criterionId)} [${colorizeVerdict(c.result)}] — ${c.criterion.slice(0, 70)}`),
+    );
+    const ci = await promptIndex(`Mark which as a false positive? [1-${chosen.failed.length}]: `, chosen.failed.length);
+    if (ci === undefined) {
+      console.error("aborted.");
+      return 0;
+    }
+    criterionId = chosen.failed[ci]!.criterionId;
+    if (note === undefined) {
+      const n = await promptLine("Optional note (Enter to skip): ");
+      note = n && n.trim() ? n.trim() : undefined;
+    }
+  }
+
+  if (!runId) {
+    console.error("error: name the run — `vf feedback --pr <N> --criterion <id>`, `vf feedback <runId> --criterion <id>`, or `vf feedback` for the interactive picker.");
+    return 2;
+  }
+  if (!criterionId) {
+    console.error("error: vf feedback needs --criterion <id> (the AC id from the run's report).");
+    return 2;
+  }
+  const res = await recordFalsePositiveFromRun(store, outputRoot, runId, criterionId, new Date().toISOString(), note);
+  if (!res.ok) {
+    console.error(res.text);
+    return 1;
+  }
+  console.log(res.text);
+  return 0;
 }
 
 /** `vf replay <runId>` (IN-625): re-run the verdict engine on a past run's stored evidence. */
@@ -1036,6 +1182,7 @@ async function main(): Promise<number> {
   if (cmd === "step") return cmdStep(args);
   if (cmd === "report") return cmdReport(args);
   if (cmd === "memory") return cmdMemory(args, positionals);
+  if (cmd === "feedback") return cmdFeedback(args, positionals);
   if (cmd === "replay") return cmdReplay(args, positionals);
   if (cmd === "show") return cmdShow(args, positionals);
   if (cmd === "signal") return cmdSignal(args, positionals);

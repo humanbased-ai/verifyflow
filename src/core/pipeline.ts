@@ -17,7 +17,7 @@ import { runUiChecks } from "../harness/ui/runUiChecks.js";
 import { type JourneyHarness, UnavailableJourneyHarness } from "../harness/journey/journeyHarness.js";
 import { runJourneyChecks } from "../harness/journey/runJourneyChecks.js";
 import type { LlmClient } from "../backends/llm.js";
-import type { MemoryStore } from "../memory/store.js";
+import { type MemoryStore, matchFeedbackRecords, isReusableProbeResult } from "../memory/store.js";
 import type { EventLog } from "../memory/eventLog.js";
 import type { GithubClient, PrRef } from "./context/github.js";
 import { parsePrRef } from "./context/github.js";
@@ -279,7 +279,14 @@ export async function runVerification(
   }
 
   // --- Verdict -------------------------------------------------------------------------
-  const verdict = await decideVerdict(criteria, plan, results, deps.llm);
+  // Load any human false-positive corrections for this repo (IN-792) and hand the engine a matcher
+  // so a flagged criterion's fail/partial is downgraded to blocked instead of re-flagged.
+  const feedbackRecords = await deps.memory.loadFeedback(pr.repo);
+  const verdict = await decideVerdict(criteria, plan, results, deps.llm, {
+    feedbackMatch: feedbackRecords.length
+      ? (text) => matchFeedbackRecords(feedbackRecords, text)
+      : undefined,
+  });
   deps.onProgress?.(`verdict: ${verdict.runVerdict}`);
 
   // Degraded cap (IN-570): without an independent acceptance source, a positive outcome
@@ -464,8 +471,10 @@ async function persistMemoryAndEvents(
 
   for (const cr of report.criterionResults) {
     const criterion = criteria.criteria.find((c) => c.id === cr.criterionId);
-    // Feed test points back: persist any probe we actually executed so future runs reuse it.
-    if (criterion?.probe && ranById.get(`probe-${cr.criterionId}`)?.executed) {
+    // Feed test points back: persist any probe we actually executed so future runs reuse it — but
+    // never cache a probe whose result was `blocked` (environment/harness failure or timeout, IN-792),
+    // or the broken command gets replayed and re-manufactures the false signal next run.
+    if (criterion?.probe && ranById.get(`probe-${cr.criterionId}`)?.executed && isReusableProbeResult(cr.result)) {
       await deps.memory.upsertTestPoint({
         repo: report.request.repo,
         component,

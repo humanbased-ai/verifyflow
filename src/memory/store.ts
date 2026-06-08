@@ -56,6 +56,60 @@ export interface FailureModeRecord {
 }
 
 /**
+ * A human correction recorded via `vf feedback` (IN-792): "this criterion was misjudged". On a
+ * later run, a criterion whose text matches a stored record is downgraded from fail/partial to
+ * `blocked` so the false positive is not re-flagged. Keyed by criterion text (same fuzzy match as
+ * test points), so a reworded-but-equivalent criterion is still recognized.
+ */
+export interface FeedbackRecord {
+  kind: "false_positive";
+  criterionText: string;
+  /** The owner/repo this applies to. Set by `recordFeedback`; lets `listFeedback` show the real
+   * name even when no sibling test point exists to recover it from the slug. */
+  repo?: string;
+  note?: string;
+  /** The run the correction came from, for auditability. */
+  runId?: string;
+  createdAt: string;
+}
+
+/**
+ * Pure matcher (no disk) shared by the store and the verdict engine: exact normalized-text match
+ * wins, otherwise the highest token-set similarity above MEMORY_MATCH_THRESHOLD — identical logic
+ * to `matchTestPoint`, so feedback and probe reuse agree on what "the same criterion" means.
+ */
+export function matchFeedbackRecords(
+  records: FeedbackRecord[],
+  criterionText: string,
+): FeedbackRecord | undefined {
+  if (records.length === 0) return undefined;
+  const target = norm(criterionText);
+  const exact = records.find((r) => norm(r.criterionText) === target);
+  if (exact) return exact;
+  const tt = tokens(criterionText);
+  let best: FeedbackRecord | undefined;
+  let bestScore = 0;
+  for (const r of records) {
+    const s = jaccard(tt, tokens(r.criterionText));
+    if (s > bestScore) {
+      bestScore = s;
+      best = r;
+    }
+  }
+  return best && bestScore >= MEMORY_MATCH_THRESHOLD ? best : undefined;
+}
+
+/**
+ * Whether a probe's outcome is worth caching as a reusable test point (IN-792). A `blocked` result
+ * means the check could not run as intended (environment/harness failure, timeout) — caching that
+ * probe would replay the same broken command and re-manufacture the false signal next run, so it is
+ * excluded. pass/fail/partial/not_evaluable all reflect a probe that actually executed.
+ */
+export function isReusableProbeResult(result: CriterionResultValue): boolean {
+  return result !== "blocked";
+}
+
+/**
  * File-based memory. This is the difference between VerifyFlow and a stateless judge
  * (Karpathy: keep reusable memory, not just a score). Test points captured on one run are
  * reused on the next; failure modes accumulate to reveal systemic problems.
@@ -287,5 +341,101 @@ export class MemoryStore {
       records.push({ category, component, count: 1, lastSeen: now });
     }
     await fs.writeFile(file, JSON.stringify(records, null, 2) + "\n");
+  }
+
+  // --- False-positive feedback (IN-792) -------------------------------------------------------
+
+  async loadFeedback(repo: string): Promise<FeedbackRecord[]> {
+    try {
+      const raw = await fs.readFile(path.join(this.dir(repo), "feedback.json"), "utf8");
+      return JSON.parse(raw) as FeedbackRecord[];
+    } catch {
+      return [];
+    }
+  }
+
+  private async loadFeedbackBySlug(slugName: string): Promise<FeedbackRecord[]> {
+    try {
+      const raw = await fs.readFile(path.join(this.root, "memory", slugName, "feedback.json"), "utf8");
+      return JSON.parse(raw) as FeedbackRecord[];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Record (upsert by normalized criterion text) a false-positive correction for a repo. */
+  async recordFeedback(repo: string, record: FeedbackRecord): Promise<void> {
+    const dir = this.dir(repo);
+    await fs.mkdir(dir, { recursive: true });
+    const file = path.join(dir, "feedback.json");
+    const records = await this.loadFeedback(repo);
+    // Stamp the repo so listing can recover owner/repo without a sibling test point.
+    const full: FeedbackRecord = { ...record, repo };
+    const key = norm(full.criterionText);
+    const existing = records.find((r) => norm(r.criterionText) === key);
+    if (existing) {
+      existing.note = full.note;
+      existing.runId = full.runId;
+      existing.createdAt = full.createdAt;
+      existing.repo = repo;
+    } else {
+      records.push(full);
+    }
+    await fs.writeFile(file, JSON.stringify(records, null, 2) + "\n");
+  }
+
+  /** Disk-backed match of a criterion against a repo's stored feedback (see matchFeedbackRecords). */
+  async matchFeedback(repo: string, criterionText: string): Promise<FeedbackRecord | undefined> {
+    return matchFeedbackRecords(await this.loadFeedback(repo), criterionText);
+  }
+
+  /** List repos that have stored feedback, with counts (`vf feedback ls`). */
+  async listFeedback(): Promise<Array<{ slug: string; repo: string; count: number }>> {
+    const memDir = path.join(this.root, "memory");
+    let entries: string[];
+    try {
+      entries = (await fs.readdir(memDir, { withFileTypes: true }))
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    } catch {
+      return [];
+    }
+    const out: Array<{ slug: string; repo: string; count: number }> = [];
+    for (const slugName of entries.sort()) {
+      const records = await this.loadFeedbackBySlug(slugName);
+      if (records.length === 0) continue;
+      // Prefer the repo stamped on the record; fall back to a sibling test point, then the slug.
+      const points = await this.loadTestPointsBySlug(slugName);
+      const repo = records[0]?.repo ?? points[0]?.repo ?? slugName;
+      out.push({ slug: slugName, repo, count: records.length });
+    }
+    return out;
+  }
+
+  /**
+   * Remove stored feedback (`vf feedback clear`): one repo's feedback.json, or every repo's. Reuses
+   * the same path-traversal guard as `clear()` so a crafted `--repo` can't escape the store.
+   */
+  async clearFeedback(repo?: string): Promise<string[]> {
+    if (repo) {
+      const dir = this.dir(repo);
+      const memRoot = path.join(this.root, "memory");
+      const rel = path.relative(memRoot, dir);
+      const escapes = rel === "" || rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+      if (escapes) throw new Error(`refusing to clear feedback outside the store: ${repo}`);
+      try {
+        await fs.rm(path.join(dir, "feedback.json"));
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw err;
+      }
+      return [slug(repo)];
+    }
+    const cleared: string[] = [];
+    for (const r of await this.listFeedback()) {
+      await fs.rm(path.join(this.root, "memory", r.slug, "feedback.json"), { force: true });
+      cleared.push(r.slug);
+    }
+    return cleared;
   }
 }

@@ -250,7 +250,10 @@ export type FailureCategory =
   | "test_flake"
   | "environment_failure"
   | "ambiguous_ticket"
-  | "insufficient_evidence";
+  | "insufficient_evidence"
+  // A criterion a human marked as a known false positive via `vf feedback` (IN-792): the verdict
+  // engine downgrades a matching fail/partial to `blocked` with this category so it is not re-flagged.
+  | "flagged_false_positive";
 
 export interface RunReport {
   schemaVersion: 1;
