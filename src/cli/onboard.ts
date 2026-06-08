@@ -1,6 +1,7 @@
 import { runDoctor, type DoctorReport } from "./doctor.js";
 import { run } from "../util/exec.js";
 import { writeCredentials, getCredentialsPath, type Credentials } from "./credentials.js";
+import { green, red, yellow, cyan, dim } from "../util/color.js";
 
 /**
  * `vf onboard` (#41): guided first-run setup. Doctor *diagnoses*; onboard *guides* — for each
@@ -290,18 +291,27 @@ const ICON: Record<OnboardStatus, string> = {
   info: "info",
 };
 
+/** Per-status colorizer for the badge word. No-op when color is disabled (non-TTY/NO_COLOR). */
+const PAINT: Record<OnboardStatus, (s: string) => string> = {
+  ok: green,
+  fix: red,
+  warn: yellow,
+  info: cyan,
+};
+
 export function renderOnboardReport(report: OnboardReport): string {
   const lines: string[] = [];
   lines.push("VerifyFlow onboarding — guided first-run setup");
   lines.push("");
   for (const s of report.steps) {
-    lines.push(`  [${ICON[s.status]}] ${s.name}: ${s.detail}`);
+    // Color the badge word but keep ICON's fixed width so columns stay aligned.
+    lines.push(`  [${PAINT[s.status](ICON[s.status])}] ${s.name}: ${dim(s.detail)}`);
     for (const i of s.instructions) lines.push(`        ${i}`);
     if (s.instructions.length) lines.push("");
   }
   lines.push(
     report.ready
-      ? "All required prerequisites are ready."
+      ? green("All required prerequisites are ready.")
       : "Apply the FIX steps above, then re-run `vf doctor` to verify.",
   );
   lines.push("");

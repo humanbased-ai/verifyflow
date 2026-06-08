@@ -46,6 +46,7 @@ import {
   ghMergePr,
   type WatchDeps,
 } from "./watch.js";
+import { green, red, yellow, cyan, dim, colorizeVerdict } from "../util/color.js";
 
 const RESULT_LABEL: Record<string, string> = {
   pass: "✓ pass",
@@ -55,16 +56,32 @@ const RESULT_LABEL: Record<string, string> = {
   blocked: "⊘ blocked",
 };
 
+/** Color a criterion result label by outcome. No-op when color is disabled (non-TTY/NO_COLOR). */
+function paintResult(result: string, label: string): string {
+  switch (result) {
+    case "pass":
+      return green(label);
+    case "fail":
+      return red(label);
+    case "partial":
+      return yellow(label);
+    default:
+      return dim(label);
+  }
+}
+
 function printCriterionTable(report: RunReport): void {
   const results = report.criterionResults;
   if (!results.length) return;
-  const bar = "─".repeat(70);
+  const bar = dim("─".repeat(70));
   console.error(`\n${bar}`);
   for (const c of results) {
-    const label = (RESULT_LABEL[c.result] ?? c.result).padEnd(14);
+    const raw = RESULT_LABEL[c.result] ?? c.result;
+    // Pad before coloring so ANSI codes don't count toward the column width.
+    const label = paintResult(c.result, raw.padEnd(14));
     const conf = c.confidence.toFixed(2);
     const text = c.criterion.length > 55 ? c.criterion.slice(0, 52) + "..." : c.criterion;
-    console.error(`  ${c.criterionId.padEnd(5)}  ${label}  ${conf}  ${text}`);
+    console.error(`  ${cyan(c.criterionId.padEnd(5))}  ${label}  ${dim(conf)}  ${text}`);
   }
   const pass = results.filter(r => r.result === "pass").length;
   const fail = results.filter(r => r.result === "fail").length;
@@ -75,7 +92,7 @@ function printCriterionTable(report: RunReport): void {
   if (partial) parts.push(`${partial} partial`);
   if (blocked) parts.push(`${blocked} blocked/not_evaluable`);
   console.error(bar);
-  console.error(`  Verdict: ${report.runVerdict}   (${parts.join(", ")})`);
+  console.error(`  Verdict: ${colorizeVerdict(report.runVerdict)}   ${dim(`(${parts.join(", ")})`)}`);
   console.error(`${bar}\n`);
 }
 
@@ -377,7 +394,7 @@ async function executeRun(args: Args): Promise<RunOutcome | number> {
     eventLog: new EventLog(outputRoot),
     uiHarnessFactory,
     journeyHarnessFactory,
-    onProgress: (msg) => console.error(`[verifyflow] ${msg}`),
+    onProgress: (msg) => console.error(`${dim("[verifyflow]")} ${msg}`),
   };
 
   if (!request.workdir) {
@@ -913,9 +930,11 @@ async function cmdWatch(args: Args): Promise<number> {
     try {
       const acted = await watchTick(repo, deps, seen);
       for (const a of acted) {
+        const merged = a.merged ? green("merged=true") : dim("merged=false");
         console.error(
-          `[verifyflow] PR #${a.pr}@${a.headSha.slice(0, 8)}: verdict=${a.verdict} merged=${a.merged}` +
-            (a.error ? ` error=${a.error}` : ""),
+          `${dim("[verifyflow]")} ${cyan(`PR #${a.pr}`)}${dim(`@${a.headSha.slice(0, 8)}`)}: ` +
+            `verdict=${colorizeVerdict(a.verdict)} ${merged}` +
+            (a.error ? ` ${red(`error=${a.error}`)}` : ""),
         );
       }
     } catch (err) {
