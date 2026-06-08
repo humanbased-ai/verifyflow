@@ -227,12 +227,29 @@ function scopedTestFor(pkg: PackageJson, runner: string): (paths: string[]) => s
   return () => undefined; // unknown runner — don't guess a scoped command
 }
 
+/**
+ * Base test command for a Node repo. When the root package.json defines a `test` script we run it
+ * directly. When it does NOT — the normal shape of a pnpm/npm monorepo whose tests live in the
+ * workspace packages, not the root (e.g. humanbased-ai/monorepo, root scripts are build/typecheck
+ * only) — `pnpm test` / `npm test` errors with "no test specified" and gets mis-scored as a product
+ * failure (IN-790). Fall back to a recursive, skip-if-missing workspace run; that is also a no-op
+ * (not an error) on a single-package repo with no tests, so it never makes things worse.
+ */
+function nodeTestCommand(pm: "npm" | "pnpm" | "yarn", pkg: PackageJson): string {
+  if (pkg.scripts?.test) return pm === "yarn" ? "yarn test" : `${pm} test`;
+  if (pm === "pnpm") return "pnpm -r --if-present test";
+  if (pm === "npm") return "npm test --workspaces --if-present";
+  // yarn's workspace-foreach syntax differs across v1/berry; keep the safe default rather than
+  // emit a command that errors on the wrong yarn version.
+  return "yarn test";
+}
+
 function nodeConfig(pm: "npm" | "pnpm" | "yarn", source: string, pkg: PackageJson): RepoConfig {
   const install = pm === "npm" ? "npm ci || npm install" : pm === "pnpm" ? "pnpm install" : "yarn install";
   const runner = pm === "npm" ? "npx" : pm;
   return {
     setup: [install],
-    test: `${pm === "yarn" ? "yarn" : pm} test`,
+    test: nodeTestCommand(pm, pkg),
     testForFiles: scopedTestFor(pkg, runner),
     source,
   };
