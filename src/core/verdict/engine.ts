@@ -18,6 +18,42 @@ export interface VerdictOutput {
 }
 
 /**
+ * Looks a criterion up against human false-positive feedback (IN-792). Returns the matched record
+ * (carrying an optional note) or undefined. The pipeline supplies one backed by the memory store;
+ * tests pass a plain function. Kept as a callback so the verdict engine stays decoupled from disk.
+ */
+export type FeedbackMatch = (criterionText: string) => { note?: string } | undefined;
+
+export interface VerdictOptions {
+  feedbackMatch?: FeedbackMatch;
+}
+
+/**
+ * Downgrade any criterion a human has flagged as a false positive (IN-792): a `fail`/`partial`
+ * whose text matches stored feedback becomes `blocked` with `flagged_false_positive`, so a known
+ * misjudgement is corrected once instead of re-flagged every run. Only fail/partial are touched —
+ * a flag never manufactures a worse verdict, and pass/blocked/not_evaluable are left alone. Mutates
+ * `results` in place; exported for unit testing.
+ */
+export function applyFalsePositiveFeedback(
+  results: CriterionResult[],
+  feedbackMatch: FeedbackMatch,
+): void {
+  for (const r of results) {
+    if (r.result !== "fail" && r.result !== "partial") continue;
+    const hit = feedbackMatch(r.criterion);
+    if (!hit) continue;
+    const from = r.result;
+    r.result = "blocked";
+    r.failureCategory = "flagged_false_positive";
+    r.confidence = Math.min(r.confidence, 0.5);
+    r.reason =
+      `Downgraded from ${from} to blocked: flagged as a known false positive via \`vf feedback\`` +
+      `${hit.note ? ` (${hit.note})` : ""}. Original: ${r.reason}`;
+  }
+}
+
+/**
  * Assigns criterion-level and run-level verdicts from harness evidence.
  *
  * Hard rules (docs/evidence-schema.md, prd.md):
@@ -31,6 +67,7 @@ export async function decideVerdict(
   plan: EvaluationPlan,
   results: HarnessResult[],
   llm: LlmClient,
+  opts: VerdictOptions = {},
 ): Promise<VerdictOutput> {
   const byStep = new Map(results.map((r) => [r.stepId, r]));
   const setupFailed = plan.steps
@@ -75,6 +112,11 @@ export async function decideVerdict(
       /* keep rule-based results when the model is unavailable/unparsable */
     }
   }
+
+  // Human false-positive corrections are applied last (IN-792): after both the rules and the LLM
+  // have had their say, a flagged criterion's fail/partial is downgraded to blocked so it stops
+  // driving the run verdict to needs_fix.
+  if (opts.feedbackMatch) applyFalsePositiveFeedback(criterionResults, opts.feedbackMatch);
 
   const runVerdict = rollUp(criterionResults);
   const summary = buildSummary(criterionResults, runVerdict, plan);

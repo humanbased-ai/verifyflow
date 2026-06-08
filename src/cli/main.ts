@@ -38,6 +38,7 @@ import { runInit } from "./init.js";
 import { runDoctor, renderDoctorReport } from "./doctor.js";
 import { runOnboard, renderOnboardReport } from "./onboard.js";
 import { memoryLs, memoryShow, memoryClear, isValidRepoArg } from "./memory.js";
+import { recordFalsePositiveFromRun, feedbackLs, feedbackClear } from "./feedback.js";
 import { showRun, showSignal, isUnsafeRunId } from "./inspect.js";
 import {
   watchTick,
@@ -114,6 +115,13 @@ Usage:
   vf memory show <key>                Dump a single stored test point (by its id).
   vf memory clear [--repo <o/r>] [--yes]
                                       Prune the reusable test-point memory (one repo, or all).
+  vf feedback <runId> --criterion <id> --false-positive [--note <text>]
+                                      Record a misjudged criterion as a known false positive so
+                                      future runs downgrade a matching criterion to blocked
+                                      instead of re-flagging it (IN-792).
+  vf feedback ls                      List recorded false-positive feedback per repo.
+  vf feedback clear [--repo <o/r>] [--yes]
+                                      Prune recorded false-positive feedback (one repo, or all).
   vf replay <runId> [--out <dir>] [--json]
                                       Re-run the verdict engine against a past run's stored evidence
                                       — no probes/tests are executed.
@@ -793,6 +801,65 @@ async function confirm(question: string): Promise<boolean> {
   }
 }
 
+/**
+ * `vf feedback` (IN-792): the human false-positive correction channel. Records a misjudged
+ * criterion so future runs downgrade it to `blocked` instead of re-flagging it.
+ */
+async function cmdFeedback(args: Args, positionals: string[]): Promise<number> {
+  const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
+  const store = new MemoryStore(outputRoot);
+  const sub = positionals[0] ?? "";
+
+  if (sub === "ls") {
+    const res = await feedbackLs(store);
+    console.log(args.json ? JSON.stringify(res.json, null, 2) : res.text);
+    return 0;
+  }
+  if (sub === "clear") {
+    const repo = str(args.repo);
+    if (repo !== undefined && !isValidRepoArg(repo)) {
+      console.error(`error: --repo must look like owner/repo (got "${repo}").`);
+      return 2;
+    }
+    if (!args.yes) {
+      const scope = repo ? `feedback for ${repo}` : "ALL false-positive feedback";
+      const ok = await confirm(`This will delete ${scope} under ${outputRoot}. Continue? [y/N] `);
+      if (!ok) {
+        console.error("aborted.");
+        return 0;
+      }
+    }
+    const res = await feedbackClear(store, repo);
+    console.log(res.text);
+    return 0;
+  }
+
+  // Default form: `vf feedback <runId> --criterion <id> [--false-positive] [--note <text>]`.
+  const runId = sub;
+  if (!runId) {
+    console.error("error: vf feedback <runId> --criterion <id> --false-positive  (or `ls` / `clear`).");
+    return 2;
+  }
+  const criterionId = str(args.criterion);
+  if (!criterionId) {
+    console.error("error: vf feedback <runId> needs --criterion <id> (the AC id from the run's report).");
+    return 2;
+  }
+  // `--false-positive` is the only correction kind today; require it so the intent is explicit and
+  // a future `--<other-kind>` can be added without changing the default.
+  if (!args["false-positive"]) {
+    console.error("error: pass --false-positive to mark the criterion as a known false positive.");
+    return 2;
+  }
+  const res = await recordFalsePositiveFromRun(store, outputRoot, runId, criterionId, new Date().toISOString(), str(args.note));
+  if (!res.ok) {
+    console.error(res.text);
+    return 1;
+  }
+  console.log(res.text);
+  return 0;
+}
+
 /** `vf replay <runId>` (IN-625): re-run the verdict engine on a past run's stored evidence. */
 async function cmdReplay(args: Args, positionals: string[]): Promise<number> {
   const runId = positionals[0];
@@ -1036,6 +1103,7 @@ async function main(): Promise<number> {
   if (cmd === "step") return cmdStep(args);
   if (cmd === "report") return cmdReport(args);
   if (cmd === "memory") return cmdMemory(args, positionals);
+  if (cmd === "feedback") return cmdFeedback(args, positionals);
   if (cmd === "replay") return cmdReplay(args, positionals);
   if (cmd === "show") return cmdShow(args, positionals);
   if (cmd === "signal") return cmdSignal(args, positionals);
