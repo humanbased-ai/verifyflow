@@ -23,6 +23,57 @@ export interface RecordResult {
   repo?: string;
 }
 
+export interface RunSummary {
+  runId: string;
+  repo: string;
+  prNumber: number;
+  issue: string;
+  finishedAt: string;
+  /** Criteria that did not pass cleanly — the candidates worth flagging (fail / partial). */
+  failed: Array<{ criterionId: string; criterion: string; result: string }>;
+}
+
+/**
+ * Summarize recent runs under `<outputRoot>/runs/`, newest first, for the interactive picker and
+ * `--pr` resolution. Reads each run's report.json; runs without one (or unreadable) are skipped.
+ */
+export async function listRecentRuns(outputRoot: string, limit = 10): Promise<RunSummary[]> {
+  const runsDir = path.join(outputRoot, "runs");
+  let entries: string[];
+  try {
+    entries = (await fs.readdir(runsDir, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
+  } catch {
+    return [];
+  }
+  const summaries: RunSummary[] = [];
+  for (const runId of entries) {
+    try {
+      const report = JSON.parse(await fs.readFile(path.join(runsDir, runId, "report.json"), "utf8")) as RunReport;
+      summaries.push({
+        runId,
+        repo: report.request.repo,
+        prNumber: report.request.prNumber,
+        issue: report.issue?.key ?? "",
+        finishedAt: report.finishedAt ?? "",
+        failed: report.criterionResults
+          .filter((c) => c.result === "fail" || c.result === "partial")
+          .map((c) => ({ criterionId: c.criterionId, criterion: c.criterion, result: c.result })),
+      });
+    } catch {
+      /* skip runs without a readable report.json */
+    }
+  }
+  // Newest first by finishedAt (ISO strings sort lexicographically); fall back to runId.
+  summaries.sort((a, b) => (b.finishedAt || b.runId).localeCompare(a.finishedAt || a.runId));
+  return summaries.slice(0, limit);
+}
+
+/** Resolve the most recent run id for a given PR number, or undefined if none is found. */
+export async function latestRunForPr(outputRoot: string, prNumber: number): Promise<string | undefined> {
+  const runs = await listRecentRuns(outputRoot, 1000);
+  return runs.find((r) => r.prNumber === prNumber)?.runId;
+}
+
 /**
  * Resolve a run's stored report, locate the criterion by id, and persist a false-positive record
  * (keyed by the criterion's text + the run's repo). Reads only what a prior `vf run` already wrote.

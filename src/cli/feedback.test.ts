@@ -5,7 +5,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MemoryStore } from "../memory/store.js";
-import { recordFalsePositiveFromRun, feedbackLs, feedbackClear } from "./feedback.js";
+import { recordFalsePositiveFromRun, feedbackLs, feedbackClear, listRecentRuns, latestRunForPr } from "./feedback.js";
 
 async function tmpRoot() {
   return fs.mkdtemp(path.join(os.tmpdir(), "vf-fbcli-"));
@@ -64,6 +64,49 @@ test("recordFalsePositiveFromRun: unknown criterion id lists the available ids",
   assert.equal(res.ok, false);
   assert.match(res.text, /no criterion "AC-99"/);
   assert.match(res.text, /AC-5/, "lists the ids that do exist");
+});
+
+/** Write a run with explicit pr/finishedAt/criteria for the listing + --pr resolution tests. */
+async function writeRun(
+  root: string,
+  runId: string,
+  repo: string,
+  prNumber: number,
+  finishedAt: string,
+  criteria: Array<{ id: string; result: string }>,
+) {
+  const dir = path.join(root, "runs", runId);
+  await fs.mkdir(dir, { recursive: true });
+  const report = {
+    request: { repo, prNumber },
+    issue: { key: `IN-${prNumber}` },
+    finishedAt,
+    criterionResults: criteria.map((c) => ({ criterionId: c.id, criterion: `text ${c.id}`, result: c.result, method: "backend", reason: "", evidence: [], confidence: 0.9 })),
+  };
+  await fs.writeFile(path.join(dir, "report.json"), JSON.stringify(report));
+}
+
+test("listRecentRuns: newest first, only fail/partial counted as failed", async () => {
+  const root = await tmpRoot();
+  await writeRun(root, "r-old", "o/r", 60, "2026-06-08T01:00:00Z", [{ id: "AC-1", result: "pass" }]);
+  await writeRun(root, "r-new", "o/r", 66, "2026-06-08T03:00:00Z", [
+    { id: "AC-5", result: "fail" },
+    { id: "AC-6", result: "partial" },
+    { id: "AC-7", result: "pass" },
+  ]);
+  const runs = await listRecentRuns(root);
+  assert.deepEqual(runs.map((r) => r.runId), ["r-new", "r-old"], "sorted newest finishedAt first");
+  assert.deepEqual(runs[0]!.failed.map((f) => f.criterionId), ["AC-5", "AC-6"], "pass excluded");
+});
+
+test("latestRunForPr: resolves the most recent run for a PR among several in flight", async () => {
+  const root = await tmpRoot();
+  await writeRun(root, "pr66-a", "o/r", 66, "2026-06-08T01:00:00Z", [{ id: "AC-1", result: "fail" }]);
+  await writeRun(root, "pr66-b", "o/r", 66, "2026-06-08T05:00:00Z", [{ id: "AC-1", result: "fail" }]);
+  await writeRun(root, "pr60-a", "o/r", 60, "2026-06-08T09:00:00Z", [{ id: "AC-1", result: "fail" }]);
+  assert.equal(await latestRunForPr(root, 66), "pr66-b", "newest run for PR 66");
+  assert.equal(await latestRunForPr(root, 60), "pr60-a");
+  assert.equal(await latestRunForPr(root, 999), undefined, "unknown PR → undefined");
 });
 
 test("feedbackLs and feedbackClear round-trip via the CLI helpers", async () => {
