@@ -1,7 +1,7 @@
 /** IN-622: vf watch decision core — Crosscheck-approve detection + per-head dedup gate. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCrosscheckApprove, watchTick, type WatchDeps, type PrSummary } from "./watch.js";
+import { parseCrosscheckApprove, watchTick, type WatchDeps, type PrSummary, type WatchObserver } from "./watch.js";
 
 // --- parseCrosscheckApprove -------------------------------------------------
 
@@ -167,6 +167,51 @@ test("a real (non-error) verdict IS deduped — needs_fix is not re-verified", a
   await watchTick("o/r", d, seen);
   await watchTick("o/r", d, seen);
   assert.equal(attempts, 1, "a conclusive verdict (needs_fix) is verified once per head");
+});
+
+// --- IN-749: observability hooks (must not change the decision core) --------
+
+test("IN-749: observer.tick reports open / already-verified / to-verify counts each tick", async () => {
+  const ticks: Array<{ open: number; alreadyVerified: number; toVerify: number }> = [];
+  const obs: WatchObserver = { tick: (s) => ticks.push(s) };
+  const d = deps({
+    listOpenPrs: async () => [
+      { number: 1, headSha: "a" }, // approved → to verify
+      { number: 2, headSha: "b" }, // not approved → skipped
+    ],
+    listIssueComments: async (_r: string, pr: number) =>
+      pr === 1 ? APPROVE : [{ body: "### Code Review by Claude\n\n⚠️ **NEEDS WORK**" }],
+  });
+  const seen = new Map<number, string>();
+  await watchTick("o/r", d, seen, obs);
+  assert.deepEqual(ticks.at(-1), { open: 2, alreadyVerified: 0, toVerify: 1 });
+
+  // Second tick: PR 1's head is now verified → counted as alreadyVerified, nothing to verify.
+  await watchTick("o/r", d, seen, obs);
+  assert.deepEqual(ticks.at(-1), { open: 2, alreadyVerified: 1, toVerify: 0 });
+});
+
+test("IN-749: observer.verifyStart fires per verified PR with its title", async () => {
+  const started: PrSummary[] = [];
+  const obs: WatchObserver = { verifyStart: (pr) => started.push(pr) };
+  const d = deps({
+    listOpenPrs: async () => [{ number: 7, headSha: "aaa", title: "Add vf --version flag" }],
+    listIssueComments: async () => APPROVE,
+  });
+  await watchTick("o/r", d, new Map(), obs);
+  assert.equal(started.length, 1);
+  assert.equal(started[0]!.number, 7);
+  assert.equal(started[0]!.title, "Add vf --version flag");
+});
+
+test("IN-749: observer is optional — omitting it leaves behavior identical", async () => {
+  const d = deps({
+    listOpenPrs: async () => [{ number: 7, headSha: "aaa" }],
+    listIssueComments: async () => APPROVE,
+  });
+  // No 4th arg: same call shape the rest of the suite uses; must still verify normally.
+  const acted = await watchTick("o/r", d, new Map());
+  assert.deepEqual(acted.map((a) => a.pr), [7]);
 });
 
 test("comment-fetch failure for a PR is skipped without marking it seen (retries next tick)", async () => {

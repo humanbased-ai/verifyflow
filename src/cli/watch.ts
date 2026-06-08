@@ -15,6 +15,8 @@ import { run } from "../util/exec.js";
 export interface PrSummary {
   number: number;
   headSha: string;
+  /** PR title, for human-readable progress output (IN-749). Optional: not all callers supply it. */
+  title?: string;
 }
 
 /** A PR issue comment — only the body is needed to read the Crosscheck verdict. */
@@ -35,6 +37,18 @@ export interface WatchAction {
   verdict: string;
   merged: boolean;
   error?: string;
+}
+
+/**
+ * Optional observability hooks (IN-749). Pure logging — they never influence the decision logic,
+ * so omitting them (as the unit tests do) leaves behavior identical. The live daemon supplies them
+ * to stream a per-tick heartbeat and per-PR framing.
+ */
+export interface WatchObserver {
+  /** Fired once per tick, after triage, with the PR counts seen this poll. */
+  tick?: (summary: { open: number; alreadyVerified: number; toVerify: number }) => void;
+  /** Fired just before a PR is verified, so its identity (number + title) can be announced. */
+  verifyStart?: (pr: PrSummary) => void;
 }
 
 /**
@@ -70,15 +84,23 @@ export async function watchTick(
   repo: string,
   deps: WatchDeps,
   seen: Map<number, string>,
+  observer?: WatchObserver,
 ): Promise<WatchAction[]> {
   const prs = await deps.listOpenPrs(repo);
   // Prune dedup entries for PRs that are no longer open (merged/closed) so `seen` can't grow
   // unbounded on a long-running daemon.
   const open = new Set(prs.map((p) => p.number));
   for (const n of [...seen.keys()]) if (!open.has(n)) seen.delete(n);
-  const acted: WatchAction[] = [];
+
+  // Triage pass: decide which PRs are eligible to verify this tick (approved + a fresh head),
+  // counting the rest, so the observer can emit one heartbeat before any (slow) verification runs.
+  let alreadyVerified = 0;
+  const toVerify: PrSummary[] = [];
   for (const pr of prs) {
-    if (seen.get(pr.number) === pr.headSha) continue; // this head already verified
+    if (seen.get(pr.number) === pr.headSha) {
+      alreadyVerified++;
+      continue; // this head already verified
+    }
     let comments: IssueComment[];
     try {
       comments = await deps.listIssueComments(repo, pr.number);
@@ -86,6 +108,13 @@ export async function watchTick(
       continue; // transient; retry next tick (don't record the head as seen)
     }
     if (!parseCrosscheckApprove(comments)) continue;
+    toVerify.push(pr);
+  }
+  observer?.tick?.({ open: prs.length, alreadyVerified, toVerify: toVerify.length });
+
+  const acted: WatchAction[] = [];
+  for (const pr of toVerify) {
+    observer?.verifyStart?.(pr);
     try {
       const r = await deps.verify(pr);
       // Dedup only after a CONCLUSIVE verification. A non-conclusive `"error"` verdict — verify
@@ -115,13 +144,13 @@ const PR_LIST_LIMIT = 100;
 
 /** List a repo's open PRs via the authorized `gh` CLI. */
 export async function ghListOpenPrs(repo: string): Promise<PrSummary[]> {
-  const res = await run("gh", ["pr", "list", "--repo", repo, "--state", "open", "--json", "number,headRefOid", "--limit", String(PR_LIST_LIMIT)]);
+  const res = await run("gh", ["pr", "list", "--repo", repo, "--state", "open", "--json", "number,headRefOid,title", "--limit", String(PR_LIST_LIMIT)]);
   if (!res.executed || res.code !== 0) throw new Error(res.spawnError ?? `gh pr list failed: ${res.stderr.slice(0, 200)}`);
-  const raw = JSON.parse(res.stdout || "[]") as { number: number; headRefOid: string }[];
+  const raw = JSON.parse(res.stdout || "[]") as { number: number; headRefOid: string; title?: string }[];
   if (raw.length >= PR_LIST_LIMIT) {
     console.error(`[verifyflow] vf watch: ${repo} has >= ${PR_LIST_LIMIT} open PRs; only the first ${PR_LIST_LIMIT} are polled this tick.`);
   }
-  return raw.map((p) => ({ number: p.number, headSha: p.headRefOid }));
+  return raw.map((p) => ({ number: p.number, headSha: p.headRefOid, title: p.title }));
 }
 
 /**
