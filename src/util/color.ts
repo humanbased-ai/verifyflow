@@ -7,8 +7,10 @@
  * callers print without these helpers so piped/saved output stays clean.
  *
  * Color is enabled only when the output is an interactive terminal and the environment hasn't
- * opted out. Because tests and pipes are not TTYs, color is off there automatically — so existing
- * string-match assertions (doctor.test.ts, onboard.test.ts) keep seeing plain text.
+ * opted out. Piped output is never a TTY, so it stays plain automatically. Tests that string-match
+ * the rendered reports (doctor.test.ts, onboard.test.ts) disable color explicitly via
+ * `refreshColor({ NO_COLOR: "1" })` — they must not rely on ambient TTY state, because the test
+ * runner inherits the terminal's stdio and would otherwise see color when run interactively.
  */
 
 const CODES = {
@@ -27,14 +29,20 @@ const CODES = {
  *  1. `NO_COLOR` present (any value) → off (https://no-color.org).
  *  2. `FORCE_COLOR` present and not "0"/"false" → on (overrides the TTY check, e.g. for CI logs).
  *  3. `TERM=dumb` → off.
- *  4. otherwise: on iff stdout is a TTY.
+ *  4. otherwise: on iff BOTH stdout and stderr are TTYs.
+ *
+ * We require both because this helper colors output on *both* streams — doctor/onboard reports go
+ * to stdout, while the criterion table, run progress, and watch lines go to stderr. Gating on a
+ * single stream would either leak ANSI into a redirected file (`vf run 2> log`) or silently drop
+ * color from the interactive stream when the other is piped (`vf run > report.md`). Requiring both
+ * to be terminals means color appears only in fully-interactive use and never pollutes a redirect.
  */
 function computeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if ("NO_COLOR" in env) return false;
   const force = env.FORCE_COLOR;
   if (force !== undefined && force !== "0" && force !== "false") return true;
   if (env.TERM === "dumb") return false;
-  return Boolean(process.stdout.isTTY);
+  return Boolean(process.stdout.isTTY && process.stderr.isTTY);
 }
 
 /** Whether color is currently enabled. A live binding so `refreshColor` can flip it in tests. */
