@@ -1008,6 +1008,10 @@ async function cmdIssue(args: Args, positionals: string[]): Promise<number> {
     console.error("error: vf issue needs --repo <owner/repo> (couldn't resolve it; only --from-run derives it automatically).");
     return 2;
   }
+  if (!isValidRepoArg(repo)) {
+    console.error(`error: --repo must look like owner/repo (got "${repo}").`);
+    return 2;
+  }
 
   const llm = await buildLlm(args);
   const res = await captureIssue(store, llm, { repo, input, source, note: str(args.note), now: new Date().toISOString() });

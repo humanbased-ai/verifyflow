@@ -552,10 +552,14 @@ export class MemoryStore {
   async recordIssue(repo: string, rec: Omit<IssueRecord, "id" | "repo">): Promise<IssueRecord> {
     const dir = this.dir(repo);
     await fs.mkdir(dir, { recursive: true });
-    const id = "iss_" + createHash("sha256").update(`${repo}\n${rec.title}\n${rec.input}\n${rec.createdAt}`).digest("hex").slice(0, 10);
+    // Id is derived from the CONTENT (repo + title + input), not the timestamp — so re-capturing the
+    // same bug is idempotent (upsert) instead of appending a near-duplicate each time (IN-807 review).
+    const id = "iss_" + createHash("sha256").update(`${repo}\n${rec.title}\n${rec.input}`).digest("hex").slice(0, 10);
     const full: IssueRecord = { id, repo, ...rec };
     const records = await this.loadIssues(repo);
-    records.push(full);
+    const i = records.findIndex((r) => r.id === id);
+    if (i >= 0) records[i] = full;
+    else records.push(full);
     await fs.writeFile(path.join(dir, "issues.json"), JSON.stringify(records, null, 2) + "\n");
     return full;
   }

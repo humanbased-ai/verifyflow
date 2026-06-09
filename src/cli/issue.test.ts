@@ -81,6 +81,26 @@ test("issueContextFromRun: unsafe / unknown run id is rejected cleanly", async (
   assert.equal((await issueContextFromRun(root, "nope")).ok, false);
 });
 
+test("issueContextFromRun: a malformed report.json is a clean error, not a crash (review fix)", async () => {
+  const root = await tmp();
+  const dir = path.join(root, "runs", "bad");
+  await fs.mkdir(dir, { recursive: true });
+  // Parses fine but missing criterionResults / request — must not throw.
+  await fs.writeFile(path.join(dir, "report.json"), JSON.stringify({ schemaVersion: 1 }));
+  const res = await issueContextFromRun(root, "bad");
+  assert.equal(res.ok, false);
+  assert.match(res.text!, /missing expected fields/);
+});
+
+test("recordIssue de-duplicates by content (re-capturing the same bug is idempotent, review fix)", async () => {
+  const root = await tmp();
+  const store = new MemoryStore(root);
+  const a = await captureIssue(store, noLlm, { repo: "o/r", input: "the same bug", source: "manual", now: "2026-06-09T00:00:00Z" });
+  const b = await captureIssue(store, noLlm, { repo: "o/r", input: "the same bug", source: "manual", now: "2026-06-09T09:00:00Z" });
+  assert.equal(a.record!.id, b.record!.id, "same content → same id");
+  assert.equal((await store.loadIssues("o/r")).length, 1, "no duplicate appended");
+});
+
 test("issueLs lists captured issues per repo; findIssue resolves by id", async () => {
   const root = await tmp();
   const store = new MemoryStore(root);

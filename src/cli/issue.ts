@@ -73,12 +73,16 @@ export async function issueContextFromRun(outputRoot: string, runId: string): Pr
   try {
     report = JSON.parse(await fs.readFile(path.join(runDirFor(outputRoot, runId), "report.json"), "utf8")) as RunReport;
   } catch {
-    return { ok: false, text: `issue: no report.json for run "${runId}" under ${path.join(outputRoot, "runs")}.` };
+    return { ok: false, text: `issue: no readable report.json for run "${runId}" under ${path.join(outputRoot, "runs")}.` };
+  }
+  // Guard against a malformed / older-schema report so a missing field is a clean error, not a crash.
+  if (!report || !Array.isArray(report.criterionResults) || !report.request?.repo) {
+    return { ok: false, text: `issue: run "${runId}" report.json is missing expected fields (criterionResults / request.repo).` };
   }
   const nonPass = report.criterionResults.filter((c) => c.result !== "pass");
   const lines = [
-    `Run ${runId} · ${report.request.repo} PR #${report.request.prNumber} · issue ${report.issue?.key ?? "-"}`,
-    `Run verdict: ${report.runVerdict}`,
+    `Run ${runId} · ${report.request.repo} PR #${report.request.prNumber ?? "-"} · issue ${report.issue?.key ?? "-"}`,
+    `Run verdict: ${report.runVerdict ?? "-"}`,
     "",
     "Non-passing criteria:",
     ...(nonPass.length
