@@ -80,7 +80,7 @@ jobs:
       - name: Publish to npm @beta
         run: |
           VERSION="${{ steps.stamp.outputs.version }}"
-          if npm view "@humanbased-ai/verifyflow@${VERSION}" version 2>/dev/null | grep -qF "${VERSION}"; then
+          if npm view "@humanbased/verifyflow@${VERSION}" version 2>/dev/null | grep -qF "${VERSION}"; then
             echo "Version ${VERSION} already on npm - skipping publish."
             exit 0
           fi
@@ -157,7 +157,7 @@ jobs:
       - name: Publish to npm @alpha
         run: |
           VERSION="${{ steps.stamp.outputs.version }}"
-          if npm view "@humanbased-ai/verifyflow@${VERSION}" version 2>/dev/null | grep -qF "${VERSION}"; then
+          if npm view "@humanbased/verifyflow@${VERSION}" version 2>/dev/null | grep -qF "${VERSION}"; then
             echo "Version ${VERSION} already on npm - skipping publish."
             exit 0
           fi
