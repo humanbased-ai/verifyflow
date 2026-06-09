@@ -40,6 +40,7 @@ import { runDoctor, renderDoctorReport } from "./doctor.js";
 import { runOnboard, renderOnboardReport } from "./onboard.js";
 import { memoryLs, memoryShow, memoryClear, isValidRepoArg } from "./memory.js";
 import { recordFalsePositiveFromRun, feedbackLs, feedbackClear, listRecentRuns, latestRunForPr } from "./feedback.js";
+import { captureIssue, issueContextFromRun, issueLs, renderIssue } from "./issue.js";
 import { showRun, showSignal, isUnsafeRunId } from "./inspect.js";
 import {
   watchTick,
@@ -125,6 +126,13 @@ Usage:
   vf feedback ls                      List recorded false-positive feedback per repo.
   vf feedback clear [--repo <o/r>] [--yes]
                                       Prune recorded false-positive feedback (one repo, or all).
+  vf issue "<description>" --repo <o/r>   [--note <text>]
+  vf issue --from-run <runId> [--repo <o/r>]
+                                      Capture a bug/error: the LLM analyzes it (root cause / impact
+                                      / repro / fix) and it is persisted to memory (IN-807).
+                                      --from-run pulls the error context from a past run's report.
+  vf issue ls [--json]                List captured issues per repo.
+  vf issue show <id>                  Dump one captured issue.
   vf replay <runId> [--out <dir>] [--json]
                                       Re-run the verdict engine against a past run's stored evidence
                                       — no probes/tests are executed.
@@ -942,6 +950,75 @@ async function cmdFeedback(args: Args, positionals: string[]): Promise<number> {
   return 0;
 }
 
+/**
+ * `vf issue` (IN-807): capture a bug/error, have the LLM analyze it, and persist it to memory.
+ *   vf issue "<description>"            analyze + store a reported bug
+ *   vf issue --from-run <runId>         pull error context from a past run and analyze it
+ *   vf issue ls [--json]               list captured issues per repo
+ *   vf issue show <id>                 dump one captured issue
+ */
+async function cmdIssue(args: Args, positionals: string[]): Promise<number> {
+  const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
+  const store = new MemoryStore(outputRoot);
+  const sub = positionals[0] ?? "";
+
+  if (sub === "ls") {
+    const res = await issueLs(store);
+    console.log(args.json ? JSON.stringify(res.json, null, 2) : res.text);
+    return 0;
+  }
+  if (sub === "show") {
+    const id = positionals[1];
+    if (!id) {
+      console.error("error: vf issue show <id> needs an issue id (list them with `vf issue ls`).");
+      return 2;
+    }
+    const rec = await store.findIssue(id);
+    if (!rec) {
+      console.error(`issue: no captured issue with id "${id}".`);
+      return 1;
+    }
+    console.log(args.json ? JSON.stringify(rec, null, 2) : renderIssue(rec));
+    return 0;
+  }
+
+  // Capture: either from a run, or from free text.
+  let input: string;
+  let source: string;
+  let repo: string | undefined = str(args.repo);
+  const fromRun = str(args["from-run"]);
+  if (fromRun) {
+    const ctx = await issueContextFromRun(outputRoot, fromRun);
+    if (!ctx.ok) {
+      console.error(ctx.text!);
+      return 1;
+    }
+    input = ctx.input!;
+    source = `run:${fromRun}`;
+    repo = repo ?? ctx.repo;
+  } else {
+    input = positionals.join(" ").trim();
+    if (!input) {
+      console.error('error: vf issue "<description>"  (or --from-run <runId>, or `ls` / `show <id>`).');
+      return 2;
+    }
+    source = "manual";
+  }
+  if (!repo) {
+    console.error("error: vf issue needs --repo <owner/repo> (couldn't resolve it; only --from-run derives it automatically).");
+    return 2;
+  }
+  if (!isValidRepoArg(repo)) {
+    console.error(`error: --repo must look like owner/repo (got "${repo}").`);
+    return 2;
+  }
+
+  const llm = await buildLlm(args);
+  const res = await captureIssue(store, llm, { repo, input, source, note: str(args.note), now: new Date().toISOString() });
+  console.log(res.text);
+  return 0;
+}
+
 /** `vf replay <runId>` (IN-625): re-run the verdict engine on a past run's stored evidence. */
 async function cmdReplay(args: Args, positionals: string[]): Promise<number> {
   const runId = positionals[0];
@@ -1197,6 +1274,7 @@ async function main(): Promise<number> {
   if (cmd === "report") return cmdReport(args);
   if (cmd === "memory") return cmdMemory(args, positionals);
   if (cmd === "feedback") return cmdFeedback(args, positionals);
+  if (cmd === "issue") return cmdIssue(args, positionals);
   if (cmd === "replay") return cmdReplay(args, positionals);
   if (cmd === "show") return cmdShow(args, positionals);
   if (cmd === "signal") return cmdSignal(args, positionals);
