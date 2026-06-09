@@ -75,6 +75,27 @@ export interface FeedbackRecord {
 }
 
 /**
+ * A captured bug/error report with the LLM's structured analysis (IN-807). Persisted per repo as a
+ * growing knowledge log via `vf issue`. The analysis fields may be empty when no LLM was available.
+ */
+export interface IssueRecord {
+  id: string;
+  repo: string;
+  title: string;
+  category?: string;
+  rootCause?: string;
+  impact?: string;
+  reproduction?: string;
+  suggestedFix?: string;
+  /** "manual" (typed) or "run:<runId>" (pulled from a past run). */
+  source: string;
+  /** The original description / error context that was analyzed (truncated). */
+  input: string;
+  note?: string;
+  createdAt: string;
+}
+
+/**
  * Pure matcher (no disk) shared by the store and the verdict engine: exact normalized-text match
  * wins, otherwise the highest token-set similarity above MEMORY_MATCH_THRESHOLD — identical logic
  * to `matchTestPoint`, so feedback and probe reuse agree on what "the same criterion" means.
@@ -504,5 +525,64 @@ export class MemoryStore {
     const dir = this.dir(repo);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "verdicts.json"), JSON.stringify(cache, null, 2) + "\n");
+  }
+
+  // --- Captured issues / bug knowledge (IN-807) ----------------------------------------------
+
+  async loadIssues(repo: string): Promise<IssueRecord[]> {
+    try {
+      return JSON.parse(await fs.readFile(path.join(this.dir(repo), "issues.json"), "utf8")) as IssueRecord[];
+    } catch {
+      return [];
+    }
+  }
+
+  private async loadIssuesBySlug(slugName: string): Promise<IssueRecord[]> {
+    try {
+      return JSON.parse(await fs.readFile(path.join(this.root, "memory", slugName, "issues.json"), "utf8")) as IssueRecord[];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Append a captured issue. The id is derived from repo + title + createdAt so it is stable and
+   * collision-resistant without a clock-based counter. Returns the stored record (with its id).
+   */
+  async recordIssue(repo: string, rec: Omit<IssueRecord, "id" | "repo">): Promise<IssueRecord> {
+    const dir = this.dir(repo);
+    await fs.mkdir(dir, { recursive: true });
+    const id = "iss_" + createHash("sha256").update(`${repo}\n${rec.title}\n${rec.input}\n${rec.createdAt}`).digest("hex").slice(0, 10);
+    const full: IssueRecord = { id, repo, ...rec };
+    const records = await this.loadIssues(repo);
+    records.push(full);
+    await fs.writeFile(path.join(dir, "issues.json"), JSON.stringify(records, null, 2) + "\n");
+    return full;
+  }
+
+  /** List repos with captured issues + counts (`vf issue ls`). */
+  async listIssues(): Promise<Array<{ slug: string; repo: string; count: number }>> {
+    let entries: string[];
+    try {
+      entries = (await fs.readdir(path.join(this.root, "memory"), { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
+    } catch {
+      return [];
+    }
+    const out: Array<{ slug: string; repo: string; count: number }> = [];
+    for (const slugName of entries.sort()) {
+      const recs = await this.loadIssuesBySlug(slugName);
+      if (recs.length === 0) continue;
+      out.push({ slug: slugName, repo: recs[0]?.repo ?? slugName, count: recs.length });
+    }
+    return out;
+  }
+
+  /** Find a single captured issue by id, across all repos (`vf issue show <id>`). */
+  async findIssue(id: string): Promise<IssueRecord | undefined> {
+    for (const r of await this.listIssues()) {
+      const hit = (await this.loadIssuesBySlug(r.slug)).find((i) => i.id === id);
+      if (hit) return hit;
+    }
+    return undefined;
   }
 }
