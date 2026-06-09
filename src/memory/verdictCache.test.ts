@@ -39,7 +39,7 @@ test("verdict cache persists and reloads per repo", async () => {
   const store = new MemoryStore(root);
   assert.deepEqual(await store.loadVerdictCache("o/r"), {});
   const cache: VerdictCache = {
-    abc123: { result: "pass", reason: "ran ok", confidence: 0.92, cachedAt: "2026-06-09T00:00:00Z" },
+    abc123: { v: 1, result: "pass", reason: "ran ok", confidence: 0.92, cachedAt: "2026-06-09T00:00:00Z" },
   };
   await store.saveVerdictCache("o/r", cache);
   assert.deepEqual(await store.loadVerdictCache("o/r"), cache);

@@ -10,7 +10,7 @@ import type {
 import type { LlmClient } from "../../backends/llm.js";
 import { extractJson } from "../../util/json.js";
 import { looksLikeHarnessError } from "../../util/harnessError.js";
-import { evidenceHash } from "../../memory/store.js";
+import { evidenceHash, isReusableProbeResult } from "../../memory/store.js";
 
 export interface VerdictOutput {
   criterionResults: CriterionResult[];
@@ -156,6 +156,10 @@ export async function decideVerdict(
   if (opts.verdictCache) {
     for (const r of criterionResults) {
       if (cached.has(r.criterionId)) continue;
+      // Don't cache `blocked` (environment/harness failure or timeout): consistent with
+      // isReusableProbeResult — a transient failure with a stable error string shouldn't be
+      // replayed as the answer; re-attempt it next run (review fix IN-801).
+      if (!isReusableProbeResult(r.result)) continue;
       const h = hashOf.get(r.criterionId);
       if (h) opts.verdictCache.put(h, { result: r.result, failureCategory: r.failureCategory, reason: r.reason, confidence: r.confidence });
     }

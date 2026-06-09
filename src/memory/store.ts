@@ -139,8 +139,16 @@ export function evidenceHash(criterionText: string, evidence: ProbeEvidence | un
   return createHash("sha256").update(payload).digest("hex").slice(0, 32);
 }
 
+/**
+ * Bump when the cached verdict's shape or the evidenceHash payload changes (IN-801 review): readers
+ * treat an entry with a different `v` as a miss, so stale entries are ignored and overwritten
+ * instead of silently served.
+ */
+export const VERDICT_CACHE_VERSION = 1;
+
 /** A cached criterion verdict (IN-801): the LLM-independent fields, reused on an evidence-hash hit. */
 export interface VerdictCacheEntry {
+  v: number;
   result: CriterionResultValue;
   failureCategory?: FailureCategory;
   reason: string;

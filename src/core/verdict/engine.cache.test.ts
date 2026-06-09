@@ -76,3 +76,16 @@ test("IN-801: without a verdictCache, behavior is unchanged (no caching path)", 
   const v = await decideVerdict(criteria, plan, results, countingLlm().llm);
   assert.equal(v.criterionResults[0]!.result, "pass");
 });
+
+test("IN-801 (review fix): a `blocked` result is NOT cached (don't replay a harness failure)", async () => {
+  const { criteria, plan } = fixture();
+  // Executed probe (so an evidence hash exists) but its output is a harness/command error →
+  // the engine returns `blocked`; that must not be written to the cache.
+  const results: HarnessResult[] = [
+    { stepId: "probe-AC-1", command: "echo ok", exitCode: 127, stdout: "", stderr: "bash: echo: command not found", durationMs: 1, executed: true, timedOut: false, evidence: [{ type: "command_output", path: "p.log" }] },
+  ];
+  const cache = memCache();
+  const v = await decideVerdict(criteria, plan, results, countingLlm().llm, { verdictCache: cache });
+  assert.equal(v.criterionResults[0]!.result, "blocked");
+  assert.equal(Object.keys(cache.store).length, 0, "blocked verdicts are not cached");
+});
