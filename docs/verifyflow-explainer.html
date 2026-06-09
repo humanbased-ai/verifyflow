@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VerifyFlow 讲解 · 这是什么、有没有用、怎么用</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; background: #0d1117; color: #e6edf3; line-height: 1.65; }
+  a { color: #58a6ff; text-decoration: none; }
+  code, .mono { font-family: "SF Mono", "Fira Code", Consolas, monospace; }
+
+  header { background: #161b22; border-bottom: 1px solid #30363d; padding: 20px 40px; display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 50; }
+  header .logo { font-size: 19px; font-weight: 700; color: #58a6ff; letter-spacing: -0.5px; }
+  header .tag { font-size: 13px; color: #8b949e; border-left: 1px solid #30363d; padding-left: 14px; }
+  nav { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
+  nav a { color: #8b949e; } nav a:hover { color: #e6edf3; }
+
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 56px 0; border-bottom: 1px solid #161b22; }
+  .kicker { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: #58a6ff; margin-bottom: 12px; }
+  h1 { font-size: 40px; line-height: 1.15; color: #f0f6fc; margin-bottom: 16px; letter-spacing: -1px; }
+  h2 { font-size: 27px; color: #f0f6fc; margin-bottom: 18px; letter-spacing: -0.4px; }
+  h3 { font-size: 16px; color: #f0f6fc; margin-bottom: 8px; }
+  p { color: #c9d1d9; margin-bottom: 14px; }
+  .lead { font-size: 18px; color: #8b949e; }
+  .muted { color: #8b949e; }
+  .big-q { font-size: 23px; color: #f0f6fc; font-weight: 600; border-left: 3px solid #58a6ff; padding: 6px 0 6px 18px; margin: 22px 0; }
+
+  .hero { padding: 72px 0 56px; }
+  .pill { display: inline-block; background: #1f2937; border: 1px solid #30363d; border-radius: 20px; padding: 5px 14px; font-size: 12px; color: #79c0ff; margin-bottom: 22px; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 800px){ .grid2,.grid3{ grid-template-columns:1fr; } h1{font-size:32px;} }
+
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px 22px; }
+  a.card { transition: border-color .15s, transform .05s; }
+  a.card:hover { border-color: #58a6ff; }
+  a.card p { color: #8b949e; }
+  .card h3 { display: flex; align-items: center; gap: 8px; }
+  .card p { font-size: 14px; margin-bottom: 0; color: #8b949e; }
+  .ic { font-size: 18px; }
+
+  .flow { display: flex; align-items: stretch; gap: 0; background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 22px; overflow-x: auto; }
+  .node { flex: 1; min-width: 150px; text-align: center; padding: 0 10px; }
+  .node .t { font-weight: 700; color: #f0f6fc; font-size: 15px; }
+  .node .who { font-size: 11px; color: #6e7681; margin: 4px 0 8px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .node .d { font-size: 12.5px; color: #8b949e; }
+  .arrow { display: flex; align-items: center; color: #30363d; font-size: 22px; padding: 0 4px; }
+  .node.vf .t { color: #3fb950; }
+
+  pre { background: #010409; border: 1px solid #21262d; border-radius: 10px; padding: 16px 18px; overflow-x: auto; font-size: 13px; color: #adbac7; margin: 12px 0; }
+  .g{color:#3fb950}.r{color:#f85149}.y{color:#d29922}.c{color:#58a6ff}.d{color:#6e7681}.p2{color:#3fb950}
+  .cmt { color: #6e7681; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 8px 0; }
+  th { text-align: left; padding: 11px 14px; background: #161b22; color: #8b949e; font-weight: 600; border-bottom: 1px solid #30363d; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  td { padding: 11px 14px; border-bottom: 1px solid #21262d; vertical-align: top; }
+  tr:hover td { background: #0f141a; }
+  .yes { color: #3fb950; font-weight: 600; } .no { color: #f85149; font-weight: 600; } .meh { color: #d29922; font-weight: 600; }
+
+  .callout { border-radius: 10px; padding: 16px 18px; margin: 16px 0; font-size: 14px; }
+  .callout.good { background: #0d2818; border: 1px solid #1b4332; }
+  .callout.warn { background: #2d1b00; border: 1px solid #4d3000; }
+  .callout.info { background: #0c1d3d; border: 1px solid #1c3a6d; }
+  .callout b { color: #f0f6fc; }
+
+  .stat { display:flex; gap: 28px; flex-wrap: wrap; margin: 18px 0; }
+  .stat .n { font-size: 30px; font-weight: 800; color: #3fb950; }
+  .stat .l { font-size: 12.5px; color: #8b949e; }
+
+  ul.clean { list-style: none; }
+  ul.clean li { padding: 5px 0 5px 22px; position: relative; color: #c9d1d9; font-size: 14px; }
+  ul.clean li::before { content: "▹"; position: absolute; left: 0; color: #58a6ff; }
+  ul.pro li::before { content: "✓"; color: #3fb950; }
+  ul.con li::before { content: "✗"; color: #f85149; }
+
+  footer { text-align: center; padding: 36px; color: #484f58; font-size: 12px; }
+  .step-num { display:inline-flex; width:24px;height:24px;border-radius:50%;background:#1f2937;border:1px solid #30363d;color:#79c0ff;font-size:13px;align-items:center;justify-content:center;margin-right:8px;font-weight:700; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⚡ VerifyFlow</div>
+  <div class="tag">交付验证 · 讲解</div>
+  <nav>
+    <a href="#toc">目录</a>
+    <a href="#what">是什么</a>
+    <a href="#demo-vf">VF 演示</a>
+    <a href="#fit">三件套</a>
+    <a href="#demo">全流程演示</a>
+    <a href="#levels">三个级别</a>
+    <a href="#eff">效率</a>
+    <a href="#install">安装</a>
+    <a href="#use">怎么用</a>
+    <a href="#case">案例</a>
+    <a href="#vs">对比</a>
+    <a href="#vs-skills">实测对比</a>
+    <a href="#vs-ci">vs CI</a>
+    <a href="#limit">局限</a>
+  </nav>
+</header>
+
+<div class="wrap">
+
+  <!-- HERO -->
+  <section class="hero" id="what">
+    <div class="pill">evidence-backed delivery verification</div>
+    <h1>代码审查说"写得对",<br>VerifyFlow 回答"做到了没"。</h1>
+    <p class="lead">它只解决一个问题:</p>
+    <div class="big-q">这个 PR,真的把它关联的那张 Linear 工单要求的事做出来了吗?</div>
+    <p>不是再跑一遍测试,也不是看代码风格。VerifyFlow 把工单里的<b>验收标准</b>逐条拎出来,
+       在真实 checkout 上<b>实际执行</b>验证、留下<b>证据</b>,最后给出"交付判决"——并随着每次运行<b>积累可复用的记忆</b>,越用越准。</p>
+  </section>
+
+  <!-- DEMO VF (VerifyFlow alone, real commands + PR comments) — first animation -->
+  <section id="demo-vf" style="width:100vw; margin-left:calc(50% - 50vw); background:#0b0f14; padding:40px 0; border-top:1px solid #161b22;">
+    <div style="max-width:1560px; margin:0 auto; padding:0 24px;">
+      <div class="kicker">先看 VerifyFlow 自己</div>
+      <h2>真实命令跑一遍 —— 验收 → 贴 PR 评论 → 反馈纠正 → 评论刷新</h2>
+      <p class="muted">用本次真跑过的命令:<span class="mono">vf --version / doctor / run …#66 --comment / feedback / 重验</span>。右侧能看到 VerifyFlow 在 PR #66 上贴的<b>交付报告评论</b>,以及标记误判后它<b>原地刷新</b>。
+        <a href="verifyflow-demo.html" target="_blank">↗ 新标签页全屏播放</a></p>
+      <div style="border:1px solid #30363d; border-radius:12px; overflow:hidden; background:#0d1117; box-shadow:0 12px 40px rgba(0,0,0,.4);">
+        <iframe src="verifyflow-demo.html" title="verifyflow demo" loading="lazy" style="width:100%; height:620px; border:0; display:block;"></iframe>
+      </div>
+    </div>
+  </section>
+
+  <!-- DEMO (full pipeline, full-bleed landscape) -->
+  <section id="demo" style="width:100vw; margin-left:calc(50% - 50vw); background:#0b0f14; padding:40px 0;">
+    <div style="max-width:1560px; margin:0 auto; padding:0 24px;">
+      <div class="kicker">再看完整流水线</div>
+      <h2>三件套联动:一条工单,从需求到"已验证合并" —— 中间无人介入</h2>
+      <p class="muted">多窗口持续监控:工单创建 → Symphony 抓到并派 agent 写 → Crosscheck 抓到 PR、审 + 派 agent 修 → VerifyFlow 抓到已批准 PR、验收并自动合并。
+        <a href="pipeline-demo.html" target="_blank">↗ 新标签页全屏播放</a></p>
+      <div style="border:1px solid #30363d; border-radius:12px; overflow:hidden; background:#0d1117; box-shadow:0 12px 40px rgba(0,0,0,.4);">
+        <iframe src="pipeline-demo.html" title="pipeline demo" loading="lazy" style="width:100%; height:760px; border:0; display:block;"></iframe>
+      </div>
+      <p class="muted" style="font-size:12px; margin-top:8px">动画示意(含打字执行命令 + "抓到工单/PR"放大高亮);输出格式取自 symphony / crosscheck / vf watch 的真实样式。右上角可重播、调速。</p>
+    </div>
+  </section>
+
+  <!-- TOC -->
+  <section id="toc" style="padding-top:40px">
+    <div class="kicker">目录</div>
+    <h2>这页讲什么</h2>
+    <div class="grid2" style="gap:10px">
+      <a class="card" href="#what" style="display:block"><h3><span class="d mono">01</span>&nbsp; 是什么</h3><p>一句话定位 + 它只回答的那个问题</p></a>
+      <a class="card" href="#fit" style="display:block"><h3><span class="d mono">02</span>&nbsp; 三件套定位</h3><p>Symphony / Crosscheck / VerifyFlow 各管一段</p></a>
+      <a class="card" href="#demo-vf" style="display:block"><h3><span class="d mono">★</span>&nbsp; VerifyFlow 单独演示</h3><p>真实命令 + PR 评论贴出/刷新</p></a>
+      <a class="card" href="#demo" style="display:block"><h3><span class="d mono">★</span>&nbsp; 完整流水线演示</h3><p>工单→派活→审/修→验收·多窗口监控</p></a>
+      <a class="card" href="#levels" style="display:block"><h3><span class="d mono">03</span>&nbsp; 三个验证级别</h3><p>功能 / UI / 端到端 + auto</p></a>
+      <a class="card" href="#eff" style="display:block"><h3><span class="d mono">04</span>&nbsp; 提没提效率(含证据)</h3><p>无人值守闭环 + 真实数据 + 诚实 caveat</p></a>
+      <a class="card" href="#install" style="display:block"><h3><span class="d mono">05</span>&nbsp; 安装</h3><p>三种方式,拿到 <span class="mono">vf</span> 命令</p></a>
+      <a class="card" href="#use" style="display:block"><h3><span class="d mono">06</span>&nbsp; 怎么用</h3><p>本次真实跑过的命令 + 输出</p></a>
+      <a class="card" href="#case" style="display:block"><h3><span class="d mono">07</span>&nbsp; 真实案例</h3><p>dogfood:抓到真问题 + 暴露误判</p></a>
+      <a class="card" href="#vs" style="display:block"><h3><span class="d mono">08</span>&nbsp; 总体对比</h3><p>vs 通用 LLM agent / CI / 人工</p></a>
+      <a class="card" href="#vs-skills" style="display:block"><h3><span class="d mono">09</span>&nbsp; 和现成 skill 实测对比</h3><p>verify / CodeRabbit / Playwright-MCP·含端到端·含它输的地方</p></a>
+      <a class="card" href="#vs-ci" style="display:block"><h3><span class="d mono">10</span>&nbsp; 和 CI/CD 单测的区别</h3><p>CI 绿 ≠ 交付对·互补不替代</p></a>
+      <a class="card" href="#limit" style="display:block"><h3><span class="d mono">11</span>&nbsp; 局限与边界</h3><p>它不做什么 + 何时别用它</p></a>
+    </div>
+  </section>
+
+  <!-- POSITIONING -->
+  <section id="fit">
+    <div class="kicker">它站在哪一环</div>
+    <h2>三件套各管一段,不重叠</h2>
+    <p class="muted">同一条流水线上,Symphony 负责"派活",Crosscheck 负责"代码对不对",VerifyFlow 负责"工单做到没"。</p>
+    <div class="flow">
+      <div class="node"><div class="t">Symphony / Jazzband</div><div class="who">orchestration</div><div class="d">读 Linear 工单 → 派编码 agent → 开 PR</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">Crosscheck</div><div class="who">code review</div><div class="d">审代码、可合并性<br>review → fix → recheck</div></div>
+      <div class="arrow">→</div>
+      <div class="node vf"><div class="t">VerifyFlow</div><div class="who">delivery verification</div><div class="d">按工单验收标准<br>真执行 → 证据 → 判决 → 合并门</div></div>
+    </div>
+    <div class="callout info" style="margin-top:18px">
+      <b>关键区别:</b>Crosscheck 看的是"这段代码写得好不好、能不能合";VerifyFlow 看的是"它到底有没有兑现工单承诺"。
+      两个问题不一样——代码很漂亮但功能没做全,Crosscheck 可能放行,VerifyFlow 会拦。
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section>
+    <div class="kicker">怎么运转</div>
+    <h2>一次验证里发生了什么</h2>
+    <div class="grid3">
+      <div class="card"><h3><span class="ic">📋</span>1. 提取验收标准</h3><p>从 Linear 工单(或 PR 描述)拆出一条条可验证的标准 AC。</p></div>
+      <div class="card"><h3><span class="ic">⚙️</span>2. 真执行探针</h3><p>checkout PR head,跑命令 / 测试 / 浏览器操作,而不是只读 diff 猜。</p></div>
+      <div class="card"><h3><span class="ic">📎</span>3. 留证据</h3><p>命令日志、截图、trace 全部存档,每条判决都能追溯到证据。</p></div>
+      <div class="card"><h3><span class="ic">⚖️</span>4. 逐条判决 + 汇总</h3><p>pass / fail / partial / blocked / not_evaluable → 汇总成交付结论。</p></div>
+      <div class="card"><h3><span class="ic">🚦</span>5. 合并门</h3><p>advisory(只报告)/ merge_gate(失败阻断)/ strict(更严)。</p></div>
+      <div class="card"><h3><span class="ic">🧠</span>6. 积累记忆</h3><p>把可复用的"测试点"存下来,下次相同标准直接复用——越用越准。</p></div>
+    </div>
+    <div class="callout info">
+      <b>怎么知道验的是哪张工单?——从 PR 反推。</b>VerifyFlow 读 <b>PR 正文里的 Linear 链接</b>,或<b>分支名里的工单号</b>(如 <span class="mono">haol/in-123-…</span>)来定位工单。
+      <br>方向很关键:<b>一张工单常常对应多个 PR</b>(拆成几次提交)。所以"<b>PR → 工单</b>"是唯一确定的——每个 PR 自带它要兑现的那张工单;反过来"工单 → PR"是一对多,会有歧义。
+      <br><b>前提:这个 PR 得能解析出工单。</b>解析不到时:要么 <span class="mono">--linear IN-123</span> 手动指定,要么 <span class="mono">--allow-no-ticket</span> 退而按 PR 自己的描述验(结论上限 <span class="mono">manual_review_required</span>)。
+    </div>
+    <div class="callout good">
+      <b>保守是设计原则:</b>拿不准的判 <span class="mono">blocked</span> / <span class="mono">not_evaluable</span>,而不是编一个假的失败。证据不够,就老实说"没法验,交给人"。
+    </div>
+  </section>
+
+  <!-- LEVELS -->
+  <section id="levels">
+    <div class="kicker">验到多深</div>
+    <h2>三个验证级别:从"命令能跑"到"用户走通"</h2>
+    <p class="muted">同一条验收标准,可以验得浅、也可以验得深。你可以指定级别,或交给 <span class="mono">auto</span> 看工单内容自动选。</p>
+
+    <table>
+      <thead>
+        <tr><th>级别</th><th>验什么</th><th>怎么验(真执行)</th><th>需要</th><th>速度</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="g mono">functional</span></td>
+          <td><b>功能验证</b><br>后端 / CLI / 库的行为</td>
+          <td>真 checkout PR head,跑命令探针 + 项目自己的测试套件,看退出码/输出</td>
+          <td>checkout / workdir</td>
+          <td>快</td>
+        </tr>
+        <tr>
+          <td><span class="c mono">ui</span></td>
+          <td><b>UI 验证</b><br>页面在浏览器里真的对</td>
+          <td>Playwright 开<b>真浏览器</b>,AI 驱动点击/填表/读页面,判断界面行为是否满足标准</td>
+          <td>Playwright + 运行中的 app(<span class="mono">--base-url</span>);需登录态用 <span class="mono">--ui-auth</span></td>
+          <td>中</td>
+        </tr>
+        <tr>
+          <td><span class="p mono" style="color:#bc8cff">journey</span></td>
+          <td><b>端到端验证</b><br>一条完整用户旅程</td>
+          <td>多步骤串联:后端操作 + 浏览器操作走完整流程(如 注册→下单→看到结果)</td>
+          <td>checkout + Playwright</td>
+          <td>慢</td>
+        </tr>
+        <tr>
+          <td><span class="y mono">auto</span></td>
+          <td><b>自动选级别</b></td>
+          <td>读工单标准挑最合适的级别;<b>跑不了浏览器就降级到 functional,并说明原因</b></td>
+          <td>——</td>
+          <td>——</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="grid3" style="margin-top:18px">
+      <div class="card">
+        <h3><span class="ic">⚙️</span>功能 · functional</h3>
+        <p style="margin-bottom:10px">"API 返回 200""CLI 输出版本号"这类——后端/命令层。最快、最稳。</p>
+        <pre style="margin:0;font-size:12px"><span class="g">$</span> vf run <span class="c">--pr</span> owner/repo#42 \
+    <span class="c">--level</span> functional <span class="c">--checkout</span></pre>
+      </div>
+      <div class="card">
+        <h3><span class="ic">🌐</span>UI · ui</h3>
+        <p style="margin-bottom:10px">"点导出按钮能下载 CSV"这类——要真在浏览器里看。先录登录态再验。</p>
+        <pre style="margin:0;font-size:12px"><span class="g">$</span> playwright codegen \
+    <span class="c">--save-storage</span>=auth.json
+<span class="g">$</span> vf run <span class="c">--pr</span> owner/repo#42 <span class="c">--level</span> ui \
+    <span class="c">--base-url</span> https://preview… <span class="c">--ui-auth</span> auth.json</pre>
+      </div>
+      <div class="card">
+        <h3><span class="ic">🧭</span>端到端 · journey</h3>
+        <p style="margin-bottom:10px">"用户从登录到完成支付"这类跨多步、跨前后端的旅程。最慢但最接近真实。</p>
+        <pre style="margin:0;font-size:12px"><span class="g">$</span> vf run <span class="c">--pr</span> owner/repo#42 \
+    <span class="c">--level</span> journey <span class="c">--checkout</span></pre>
+      </div>
+    </div>
+    <div class="callout info" style="margin-top:16px">
+      <b>不确定选哪个?</b>用 <span class="mono">--level auto</span>:它看工单要求的是"接口行为"还是"界面交互"来决定。
+      环境跑不了浏览器(比如没装 Playwright)时,它会<b>自动降级到 functional 并在报告里说明为什么</b>,不会假装验过。
+    </div>
+  </section>
+
+  <!-- EFFICIENCY -->
+  <section id="eff">
+    <div class="kicker">到底提没提效率</div>
+    <h2>它替掉的是"人肉确认工单"这件事</h2>
+    <div class="grid2">
+      <div class="card">
+        <h3>❌ 没有它的时候</h3>
+        <ul class="clean con">
+          <li>Reviewer 看完代码,还得回去翻工单:"它说要做的几条,都做了吗?"</li>
+          <li>手动拉分支、跑一遍、点一遍 UI 确认</li>
+          <li>"看起来对"就合了,工单没真正核对</li>
+          <li>每个 PR 重复一遍,经验留不下来</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>✅ 有它之后</h3>
+        <ul class="clean pro">
+          <li>工单标准自动逐条核对,带证据贴回 PR</li>
+          <li>真 checkout + 执行,不靠"应该没问题"</li>
+          <li>失败可设成阻断合并,守住交付质量</li>
+          <li>测试点进记忆,下次同类标准秒复用</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout info">
+      <b>结合 Symphony + Crosscheck,能跑成"无人值守闭环":</b>
+    </div>
+    <div class="flow">
+      <div class="node"><div class="t">工单</div><div class="who">Linear</div><div class="d">需求进来</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">Symphony</div><div class="who">自动</div><div class="d">派 agent 写 → 开 PR</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">Crosscheck</div><div class="who">自动</div><div class="d">审 → 修 → 批准</div></div>
+      <div class="arrow">→</div>
+      <div class="node vf"><div class="t">VerifyFlow watch</div><div class="who">自动</div><div class="d">验交付 → accept 自动合</div></div>
+    </div>
+    <p class="muted" style="margin-top:14px">
+      <span class="mono">vf watch --auto-merge</span> 盯着 Crosscheck 批准过的 PR,验证通过就 squash-merge——
+      从"工单"到"已验证合并",中间可以不需要人。人只在它说 <span class="mono">manual_review_required</span> 时才介入。
+    </p>
+
+    <h3 style="margin-top:30px;font-size:20px">现有证据 <span class="muted" style="font-size:13px;font-weight:400">(诚实版:早期 dogfood,机制已跑通,规模化工时数据待积累)</span></h3>
+    <div class="grid2" style="margin-top:10px">
+      <div class="card" style="border-color:#1b4332">
+        <h3 style="color:#3fb950">✅ 闭环每一环都真实跑通(本次,可核对)</h3>
+        <ul class="clean pro">
+          <li><b>PR #60</b>(--version):Crosscheck 审出 NEEDS WORK → 修 → recheck <b>APPROVE</b> → 合并</li>
+          <li><b>PR #66</b>:Crosscheck 批准后 <span class="mono">vf watch</span> <b>自动接手</b>验证(无人触发)→ 判 needs_fix</li>
+          <li><span class="mono">--auto-merge</span> 因为没过<b>正确地没合 #66</b> —— 门控不是瞎合</li>
+          <li>反馈回路:标 AC-5 → 重验降级 → PR 评论自动刷新</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>📊 工具自己的真实指标 <span class="muted" style="font-weight:400">(vf report)</span></h3>
+        <div class="stat" style="margin:6px 0 10px">
+          <div><div class="n" style="font-size:24px">39.1%</div><div class="l">记忆复用率<br>(越用越省的证据)</div></div>
+          <div><div class="n" style="font-size:24px">47.8%</div><div class="l">标准 pass 率</div></div>
+          <div><div class="n" style="font-size:24px;color:#d29922">37%</div><div class="l">not_evaluable<br>(也暴露了保守短板)</div></div>
+        </div>
+        <p style="font-size:13px">4 次 dogfood run · 46 条标准核对 · verdict:needs_fix×2 / manual_review_required×2</p>
+      </div>
+    </div>
+    <div class="callout warn" style="margin-top:14px">
+      <b>还没有的:</b>没有"省了多少工时"的规模化实测——这 4 次都是给自己验,样本小。要拿硬数字,需要在真实团队 repo 上跑一段时间,用 <span class="mono">vf report --trend</span> 出质量/复用曲线。<b>结论:机制上能提效、且已端到端跑通;规模化收益待真实项目数据。</b>
+    </div>
+  </section>
+
+  <!-- INSTALL -->
+  <section id="install">
+    <div class="kicker">先装上</div>
+    <h2>安装(否则 <span class="mono" style="font-size:22px">vf</span> 会报 command not found)</h2>
+
+    <div class="callout info">
+      <b>前置条件:</b>Node ≥ 20 · <span class="mono">gh</span> 已登录(<span class="mono">gh auth login</span>)· 读 Linear 工单需 <span class="mono">LINEAR_API_KEY</span>(或用 <span class="mono">--fixtures</span> 离线)· <span class="mono">claude</span> 已登录(可选,没有就降级为规则模式)。
+    </div>
+
+    <div class="grid3" style="margin-top:6px">
+      <div class="card">
+        <h3>A · 零安装,马上试</h3>
+        <p style="margin-bottom:10px">不会得到 <span class="mono">vf</span> 命令,每次敲全名。适合先看一眼。</p>
+        <pre style="margin:0"><span class="g">$</span> npx github:humanbased-ai/verifyflow demo
+<span class="g">$</span> npx github:humanbased-ai/verifyflow doctor</pre>
+      </div>
+      <div class="card" style="border-color:#1b4332">
+        <h3 style="color:#3fb950">B · 拿到 vf 命令(推荐)</h3>
+        <p style="margin-bottom:10px">克隆 + link,之后全局可用 <span class="mono">vf</span>。</p>
+        <pre style="margin:0"><span class="g">$</span> git clone https://github.com/\
+    humanbased-ai/verifyflow
+<span class="g">$</span> cd verifyflow
+<span class="g">$</span> npm install   <span class="cmt"># 装依赖+自动build</span>
+<span class="g">$</span> npm link      <span class="cmt"># vf 软链到全局</span>
+<span class="g">$</span> vf doctor     <span class="cmt"># 现在能用了</span></pre>
+      </div>
+      <div class="card">
+        <h3>C · npm 全局安装</h3>
+        <p style="margin-bottom:10px"><span class="y">尚未发布到 npm,暂不可用</span>;正式发布后:</p>
+        <pre style="margin:0"><span class="d">$</span> npm install -g \
+    @humanbased-ai/verifyflow
+<span class="d">$</span> vf doctor</pre>
+      </div>
+    </div>
+    <div class="callout warn" style="margin-top:16px">
+      用方式 B 的话:<b>拉了新代码(<span class="mono">git pull</span>)后跑一次 <span class="mono">npm run build</span></b>,否则 <span class="mono">vf</span> 跑的还是旧编译产物。(无需再 <span class="mono">npm install</span>——本项目零运行时依赖。)
+    </div>
+  </section>
+
+  <!-- HOW TO USE -->
+  <section id="use">
+    <div class="kicker">怎么用</div>
+    <h2>常用命令</h2>
+    <p class="muted">CLI 是 <span class="mono">verifyflow</span>,短名 <span class="mono">vf</span>。零依赖、不存任何密钥(复用你本机已授权的 gh / claude)。</p>
+    <div class="callout info">
+      下面的命令<b>假设你已按上面方式 B/C 装好 <span class="mono">vf</span></b>。还没装?把每条里的 <span class="mono">vf</span> 换成 <span class="mono">npx github:humanbased-ai/verifyflow</span> 也能跑(方式 A)。
+    </div>
+
+    <p class="muted" style="font-size:13px">下面全部是本项目<b>本次真实跑过的命令和输出</b>(repo:<span class="mono">humanbased-ai/verifyflow</span>)。</p>
+
+    <h3 style="margin-top:14px">① 先体检环境</h3>
+    <pre><span class="g">$</span> vf doctor
+  [<span class="g">ok  </span>] gh: found
+  [<span class="g">ok  </span>] LINEAR_API_KEY: set
+  [<span class="g">ok  </span>] claude: found
+  [<span class="g">ok  </span>] uv: found
+  [<span class="y">WARN</span>] sandbox (docker/podman): neither docker nor podman found — probes run on the host
+  [<span class="g">ok  </span>] playwright: installed
+<span class="g">doctor: all required tools are ready.</span></pre>
+
+    <h3>② 挂着自动盯(流水线模式 · 真实输出)</h3>
+    <pre><span class="g">$</span> vf watch <span class="c">--repo</span> humanbased-ai/verifyflow <span class="c">--auto-merge</span> <span class="c">--interval</span> 120
+<span class="d">[verifyflow]</span> vf watch on <span class="c">humanbased-ai/verifyflow</span> — every 120s, auto-merge: <span class="g">on</span> <span class="d">(Ctrl-C to stop).</span>
+<span class="d">[verifyflow] tick: 1 open · 0 already verified · 0 approved & pending — nothing to do</span>
+<span class="cmt"># …Crosscheck 批准了 #66 之后,下一轮自动接手:</span>
+<span class="p2">▶</span> verifying <span class="c">PR #66</span> <span class="d">"docs: bring README up to date with the current CLI surface (IN-791)"</span>
+  <span class="c">#66</span> <span class="d">fetched IN-791 and PR #66 (1 changed file)</span>
+  <span class="c">#66</span> <span class="d">extracted 12 acceptance criteria</span>
+  <span class="c">#66</span> <span class="d">verdict: needs_fix</span>
+<span class="d">•</span> <span class="c">PR #66</span><span class="d">@36571999</span> → <span class="r">needs_fix</span></pre>
+
+    <h3>③ 验证某个 PR(真 checkout + 贴回评论)</h3>
+    <pre><span class="g">$</span> vf run <span class="c">--pr</span> humanbased-ai/verifyflow#66 <span class="c">--checkout</span> <span class="c">--comment</span>
+<span class="cmt"># 真实输出里的判定表(节选):</span>
+<span class="d">────────────────────────────────────────────────────────</span>
+  <span class="c">AC-1</span>  <span class="g">✓ pass</span>          0.92  Quickstart leads with vf demo …
+  <span class="c">AC-5</span>  <span class="r">✗ fail</span>          0.85  Setup section states vf onboard saves the key …
+  <span class="c">AC-9</span>  <span class="y">? not_evaluable</span> 0.80  typecheck / test / build pass …
+<span class="d">────────────────────────────────────────────────────────</span>
+  Verdict: <span class="r">needs_fix</span></pre>
+    <p class="muted" style="font-size:13px">→ 这里的 AC-5 是个<b>误判</b>(沙箱剥了密钥导致 <span class="mono">vf onboard</span> exit 1)。下一步就用反馈回路纠正它 ↓</p>
+
+    <h3>④ 判错了?一句话纠正(本次真实操作)</h3>
+    <pre><span class="g">$</span> vf feedback <span class="c">--pr</span> 66 <span class="c">--criterion</span> AC-5
+feedback: recorded AC-5 (<span class="d">"Setup section states that `vf onboard` saves the Linear key …"</span>)
+  as a false positive for <span class="c">humanbased-ai/verifyflow</span>. Future runs will downgrade
+  a matching criterion to <span class="y">blocked</span>.
+
+<span class="g">$</span> vf run <span class="c">--pr</span> humanbased-ai/verifyflow#66 <span class="c">--checkout</span> <span class="c">--comment</span>   <span class="cmt"># 重验</span>
+  <span class="c">AC-5</span>  <span class="y">🚧 blocked</span>  <span class="d">Downgraded from fail to blocked: flagged as a known false positive via `vf feedback`</span>
+  Verdict: <span class="y">manual_review_required</span>   <span class="cmt"># 不再是 needs_fix</span></pre>
+    <p class="muted" style="font-size:13px">标记一次永久生效;记不住参数就直接 <span class="mono">vf feedback</span> 交互式选。</p>
+
+    <div class="grid3" style="margin-top:18px">
+      <div class="card"><h3>验证级别</h3><p><span class="mono">functional</span> 命令/测试 · <span class="mono">ui</span> 真浏览器(Playwright) · <span class="mono">journey</span> 多步端到端 · <span class="mono">auto</span> 自动选</p></div>
+      <div class="card"><h3>合并门</h3><p><span class="mono">advisory</span> 只报告 · <span class="mono">merge_gate</span> needs_fix 阻断 · <span class="mono">strict</span> 更严</p></div>
+      <div class="card"><h3>历史 & 记忆</h3><p><span class="mono">vf report --trend</span> 质量趋势 · <span class="mono">vf replay</span> 重判 · <span class="mono">vf memory ls</span> 看记忆</p></div>
+    </div>
+  </section>
+
+  <!-- CASE STUDY -->
+  <section id="case">
+    <div class="kicker">真实案例(本项目自己 dogfood)</div>
+    <h2>它给自己的 PR 验了几轮,好坏都暴露了</h2>
+    <p class="muted">下面是真实发生的,不是演示数据——既说明它有用,也暴露了短板。</p>
+
+    <div class="callout good">
+      <span class="step-num">A</span><b>抓到真问题(`vf --version` PR)。</b>
+      Crosscheck 给这个 PR 标了 NEEDS WORK,指出<b>缺测试、help 没列 --version、import 风格不一致</b>——全是真该补的。
+      补完复审 → APPROVE → 合并。这正是流水线该有的样子。
+    </div>
+
+    <div class="callout warn">
+      <span class="step-num">B</span><b>暴露误判(README PR)。</b>
+      验文档型标准时,它去跑 <span class="mono">vf onboard</span>,沙箱把密钥剥了导致命令 exit 1 → 误判成"失败"。
+      其实 README 内容是对的。<b>这种"文档标准用错了探针"的误报被真实地复现了。</b>
+    </div>
+
+    <div class="callout info">
+      <span class="step-num">C</span><b>误判催生了新能力。</b>
+      为了解决 B,当场设计并合入了<b>人类反馈回路</b>(<span class="mono">vf feedback</span>):
+      <span class="mono">vf feedback --pr 66 --criterion AC-5</span> 标一次 → 重验后那条从 <span class="r">fail</span> 降为 <span class="y">blocked</span>,
+      整体从 <span class="r">needs_fix</span> 变 <span class="y">manual_review_required</span>,PR 评论自动刷新。<b>判错→一句话纠正→永久生效。</b>
+    </div>
+
+    <div class="stat">
+      <div><div class="n">5</div><div class="l">条真实 PR 走完<br>工单→审→验→合 闭环</div></div>
+      <div><div class="n">1 句话</div><div class="l">纠正一次误判<br>(以前要改代码)</div></div>
+      <div><div class="n">271</div><div class="l">单元测试守底<br>每次改动都验证</div></div>
+    </div>
+  </section>
+
+  <!-- COMPARISON -->
+  <section id="vs">
+    <div class="kicker">和别的方案比</div>
+    <h2>对比已有的"验收 agent / skill"</h2>
+    <table>
+      <thead>
+        <tr><th>维度</th><th>VerifyFlow</th><th>通用 LLM 验收 agent / skill</th><th>CI(单测/流水线)</th><th>人工 review</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>对照的是什么</td><td class="yes">Linear 工单的验收标准</td><td class="meh">PR diff / 描述</td><td class="no">仓库自己的测试</td><td>工单 + 经验</td></tr>
+        <tr><td>真执行还是读文本</td><td class="yes">真 checkout + 执行</td><td class="no">多数只读 diff 判断</td><td class="yes">真执行</td><td class="meh">看情况手跑</td></tr>
+        <tr><td>留证据可追溯</td><td class="yes">日志/截图/trace 存档</td><td class="no">一段文字结论</td><td class="meh">CI 日志</td><td class="no">凭印象</td></tr>
+        <tr><td>会积累记忆变聪明</td><td class="yes">测试点 + 失败模式记忆</td><td class="no">无状态,每次重头</td><td class="no">无</td><td class="meh">靠人记</td></tr>
+        <tr><td>能卡合并门</td><td class="yes">advisory/gate/strict</td><td class="no">一般不接门控</td><td class="yes">required check</td><td class="yes">approve</td></tr>
+        <tr><td>判错能被纠正</td><td class="yes">vf feedback 一句话</td><td class="no">改 prompt/代码</td><td class="meh">改测试</td><td class="yes">人改主意</td></tr>
+        <tr><td>UI / 端到端</td><td class="yes">Playwright 真浏览器</td><td class="no">通常不行</td><td class="meh">需自建</td><td class="meh">手点</td></tr>
+        <tr><td>结果稳定性</td><td class="meh">有随机性(在修)</td><td class="no">随机性大</td><td class="yes">确定</td><td class="meh">因人而异</td></tr>
+      </tbody>
+    </table>
+    <div class="grid2" style="margin-top:18px">
+      <div class="card">
+        <h3 style="color:#3fb950">VerifyFlow 的强项</h3>
+        <ul class="clean pro">
+          <li>验的是"有没有兑现工单",不是"测试过没过"——这是 CI 不知道的事</li>
+          <li>真执行 + 证据 + 记忆,比无状态 LLM judge 扎实得多</li>
+          <li>能接合并门,能在流水线里自动闭环</li>
+          <li>判错有正规纠错通道(反馈回路)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="color:#f85149">还要诚实承认的</h3>
+        <ul class="clean con">
+          <li>结果有随机性(同代码跑两次可能不同)——已立项修</li>
+          <li>"内部逻辑型"标准它会瞎编 shell 命令,不如直接跑单测准</li>
+          <li>偏保守,常出一堆 not_evaluable,需要人收尾</li>
+          <li>替代不了 CI 和代码审查,是补位不是顶替</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- VS REAL SKILLS -->
+  <section id="vs-skills">
+    <div class="kicker">和现成的测试 skill 逐个比</div>
+    <h2>同一件事,它们各自怎么做</h2>
+    <p class="muted">不是说别的工具不好——它们各自在自己那层很强。差别在<b>"绑不绑工单、执不执行、留不留证据/记忆、接不接合并门"</b>。(以下基于各自公开资料 + 本会话实测)</p>
+
+    <table>
+      <thead>
+        <tr><th>能力</th><th>VerifyFlow</th><th>Claude Code <span class="mono">verify</span> skill</th><th>CodeRabbit</th><th>Playwright-MCP / browser-use</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>定位</td><td class="yes">按工单验收标准判交付</td><td>临时跑一下确认改动</td><td>审代码 diff</td><td>控制浏览器的引擎</td></tr>
+        <tr><td>真执行</td><td class="yes">✓ checkout+跑</td><td class="yes">✓ 跑应用观察</td><td class="no">✗ 只读 diff,不跑</td><td class="yes">✓ 真浏览器操作</td></tr>
+        <tr><td>绑 Linear 工单标准</td><td class="yes">✓ 逐条对照</td><td class="no">✗ 凭指令</td><td class="no">✗</td><td class="no">✗ 你告诉它做啥</td></tr>
+        <tr><td>留证据可追溯</td><td class="yes">✓ 日志/截图/trace</td><td class="meh">对话里看一眼</td><td class="meh">评论文字</td><td class="meh">截图/快照</td></tr>
+        <tr><td>积累记忆变聪明</td><td class="yes">✓ 测试点复用 39%</td><td class="no">✗ 每次重来</td><td class="no">✗ 无状态</td><td class="no">✗ 无状态</td></tr>
+        <tr><td>接合并门 / 批量盯</td><td class="yes">✓ gate + watch</td><td class="no">✗ 一次性</td><td class="meh">可做 check</td><td class="no">✗</td></tr>
+        <tr><td>UI / 端到端</td><td class="yes">✓(内部用 Playwright)</td><td class="meh">手动驱动</td><td class="no">✗</td><td class="yes">✓ 最强</td></tr>
+        <tr><td style="color:#8b949e">—— 下面是 VerifyFlow 输的地方 ——</td><td colspan="4" style="color:#6e7681">诚实对比,不是只挑赢的说</td></tr>
+        <tr><td>代码质量 / 安全审查深度</td><td class="no">✗ 根本不审代码</td><td class="no">✗</td><td class="yes">✓✓ 最强(40+ linter/SAST)</td><td class="no">✗</td></tr>
+        <tr><td>速度 / 轻量</td><td class="no">✗ 慢(checkout+执行 ~1 分钟/次)</td><td class="yes">✓ 快</td><td class="yes">✓ 秒级评论</td><td class="meh">中</td></tr>
+        <tr><td>结果确定性</td><td class="no">✗ 有随机性(在修)</td><td class="meh">看指令</td><td class="meh">LLM 波动</td><td class="yes">✓ 脚本可复现</td></tr>
+        <tr><td>上手成本 / 是否需要工单</td><td class="no">✗ 要好工单+配置 repo</td><td class="yes">✓ 零配置一句话</td><td class="yes">✓ 装上即用</td><td class="meh">要写/录脚本</td></tr>
+        <tr><td>成熟度 / 生态</td><td class="no">✗ 早期·4 次 dogfood·未发 npm</td><td class="meh">内置</td><td class="yes">✓ 成熟商用</td><td class="yes">✓ 成熟生态</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout info" style="margin-top:6px">
+      <b>注意:不是竞争关系。</b>VerifyFlow 的 <span class="mono">ui</span> 级别本身就<b>建在 Playwright 这类浏览器引擎之上</b>;它做的是在上面加一层"绑工单 → 判交付 → 留证据 → 进合并门"。
+    </div>
+
+    <h3 style="margin-top:22px">案例 ①(功能):"确认 PR #66 把 README 工单的 12 条都做到了"</h3>
+    <div class="grid2">
+      <div class="card"><h3>CodeRabbit / code-review skill</h3><p>读 diff,给"这段写得好不好"的评论。<b>但它不执行,也不知道工单要求那 12 条</b>——没法回答"做到了没"。</p></div>
+      <div class="card"><h3>verify skill</h3><p>你得自己说"去核对这 12 条";它跑一下、对话里回你结论。<b>跑完即忘,不贴回 PR、不进门、下次还得重说一遍。</b></p></div>
+      <div class="card" style="border-color:#1b4332"><h3 style="color:#3fb950">VerifyFlow(本次真实)</h3><p>自动从工单抽出 12 条 → 逐条跑探针 → 判定表贴回 PR #66 → AC-5 误判被 <span class="mono">vf feedback</span> 纠正 → 重验后 PR 评论自动刷新。全程留证据。</p></div>
+      <div class="card"><h3>Playwright-MCP</h3><p>这是浏览器任务,功能/文档型标准用不上它。</p></div>
+    </div>
+
+    <h3 style="margin-top:18px">案例 ②(UI):"验证'点导出按钮能下载 CSV'"</h3>
+    <div class="grid2">
+      <div class="card"><h3>Playwright-MCP / browser-use</h3><p><b>能把浏览器开起来点按钮——而且很强。</b>但它只是执行你下的指令,不知道这对应工单哪条标准,不给"交付判决",不沉淀证据/记忆,也不接合并门。</p></div>
+      <div class="card" style="border-color:#1b4332"><h3 style="color:#3fb950">VerifyFlow <span class="mono">--level ui</span></h3><p>底层<b>用同一套 Playwright</b> 开真浏览器点按钮,但把这一步<b>挂到工单那条标准上</b>,产出 pass/fail + 截图证据 + 汇总判决,失败能阻断合并。</p></div>
+    </div>
+
+    <h3 style="margin-top:18px">案例 ③(端到端):"验证'用户能注册 → 下单 → 看到确认页'" <span class="muted" style="font-size:12px;font-weight:400">(示意场景 · journey 级别本次未实跑)</span></h3>
+    <div class="grid2">
+      <div class="card"><h3>Playwright-MCP / browser-use</h3><p><b>能把整条流程在浏览器里走通,执行力最强。</b>但步骤要你编排,它不知道这对应工单哪条标准,不产出交付判决,不串起可追溯的证据链,也不接合并门。</p></div>
+      <div class="card"><h3>手写 E2E 脚本(Cypress / Playwright)</h3><p><b>确定、可复现、最可靠。</b>但要人写、要维护,而且和工单脱节——覆盖什么由写脚本的人定,不是工单定。</p></div>
+      <div class="card" style="border-color:#1b4332"><h3 style="color:#3fb950">VerifyFlow <span class="mono">--level journey</span></h3><p>把这条多步旅程<b>挂到工单那条标准上</b>:后端操作 + 浏览器操作串起来走,每步留证据,汇总成交付判决,失败能拦合并。</p></div>
+      <div class="card"><h3>诚实短板</h3><p>流程越复杂、越长,VerifyFlow 的稳健性<b>不如手写脚本</b>;它赢在"绑工单 + 判交付 + 进流水线",不在"执行得多稳"。</p></div>
+    </div>
+
+    <h3 style="margin-top:22px">什么时候<span class="r">别</span>用 VerifyFlow(用别的更合适)</h3>
+    <div class="grid2">
+      <div class="card"><h3>👉 想查代码 bug / 安全 / 风格</h3><p>用 <b>CodeRabbit / Crosscheck / code-review skill</b>。VerifyFlow 压根不审代码质量。</p></div>
+      <div class="card"><h3>👉 只想快速确认"这改动有没有效"</h3><p>用 <b>verify skill</b>。不用建工单、不用配 repo,一句话就跑,比 VerifyFlow 轻得多。</p></div>
+      <div class="card"><h3>👉 要写复杂、可复现的 UI/E2E 脚本</h3><p>直接用 <b>Playwright(MCP)</b>。它的浏览器自动化能力和确定性都强过 VerifyFlow 的 ui 级别。</p></div>
+      <div class="card"><h3>👉 要快、要稳、要 required check</h3><p>用 <b>CI / 单元测试</b>。确定、秒级、可信;VerifyFlow 慢且有随机性,是补位不是顶替。</p></div>
+    </div>
+
+    <div class="callout info" style="margin-top:14px">
+      <b>平衡的一句话:</b>VerifyFlow 唯一真正比别人强的地方,是"<b>把交付对照 Linear 工单、真执行、留证据、能进合并门</b>"这一整套——别的工具单点更强(审代码、控浏览器、快),但都没把这条链闭上。
+      它的代价也实在:<b>慢、有随机性、偏保守、要好工单、还很早期</b>。<u>选它,是因为你要的是"工单到底兑现没有"这个特定问题,而不是因为它哪都强。</u>
+    </div>
+  </section>
+
+  <!-- VS CI -->
+  <section id="vs-ci">
+    <div class="kicker">和 CI/CD 单元测试的区别</div>
+    <h2>CI 绿 ≠ 交付对</h2>
+    <p class="muted">最常被问的一个问题:"我都有 CI 单测了,为什么还要它?" —— 因为它俩回答的是<b>两个不同的问题</b>。</p>
+
+    <table>
+      <thead>
+        <tr><th></th><th>CI / 单元测试</th><th>VerifyFlow</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>回答的问题</td><td>"现有测试过不过?有没有弄坏已有行为?"</td><td class="yes">"这个 PR 有没有兑现<b>工单</b>要求的那几条?"</td></tr>
+        <tr><td>知道 Linear 工单吗</td><td class="no">✗ 完全不知道</td><td class="yes">✓ 从 PR 反推工单,逐条对验收标准</td></tr>
+        <tr><td>"测什么"由谁决定</td><td>写测试的开发者</td><td class="yes">工单的验收标准</td></tr>
+        <tr><td>确定性 / 速度</td><td class="yes">✓ 确定、秒级、可做 required check</td><td class="meh">慢些;靠缓存才稳定(IN-801)</td></tr>
+        <tr><td>内部逻辑对不对</td><td class="yes">✓ 写好的单测最可靠</td><td class="no">✗ 弱(会现编 shell 命令)</td></tr>
+        <tr><td>关系</td><td colspan="2" style="color:#c9d1d9">互补。CI 是地基;VerifyFlow 站在上面加"交付对没对工单"这一层——而且<b>功能级别还会顺带跑你的测试套件</b>当作其中一个探针。</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn" style="margin-top:14px">
+      <b>关键例子:</b>一个 PR 可以<b>所有单测全绿</b>(没弄坏任何旧东西),但工单要的 3 条里只做了 2 条——
+      <b>CI 不会报</b>,因为没人给"工单第 3 条"写过测试。<b>VerifyFlow 会</b>,因为它把那 3 条从工单里抽出来逐条验。
+    </div>
+    <div class="callout good">
+      <b>反过来也成立:</b>"这段逻辑算得对不对"这种,<b>写好的单元测试比 VerifyFlow 现编命令靠谱得多</b>。
+      所以别拿它替 CI——让 CI 守"代码正确",让 VerifyFlow 守"交付了工单"。两条腿走路。
+    </div>
+  </section>
+
+  <!-- LIMITS -->
+  <section id="limit">
+    <div class="kicker">边界</div>
+    <h2>它不做什么</h2>
+    <ul class="clean">
+      <li>不审代码、不判可合并性 —— 那是 Crosscheck</li>
+      <li>不拆工单、不派编码 agent —— 那是 Symphony / Jazzband</li>
+      <li>不动钱、不发生产邮件、不做不可逆副作用</li>
+      <li>不替代 CI</li>
+    </ul>
+    <div class="callout info" style="margin-top:14px">
+      <b>一句话总结:</b>VerifyFlow 把"这个 PR 到底有没有兑现工单"这件原本靠人肉确认的事,变成了
+      <b>可自动执行、带证据、可纠错、能进流水线</b>的一环。它不完美(随机性、保守),但在
+      "Symphony 写 → Crosscheck 审 → VerifyFlow 验"这条链上,它补的是最后也最关键的一环:<b>交付是否为真。</b>
+    </div>
+  </section>
+
+</div>
+
+<footer>VerifyFlow · evidence-backed delivery verification · humanbased-ai/verifyflow</footer>
+
+</body>
+</html>

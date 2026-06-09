@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VerifyFlow 单独演示 · 真实命令 + PR 评论</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; background: #0d1117; color: #e6edf3; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+  .mono { font-family: "SF Mono","Fira Code",Consolas,monospace; }
+
+  header { background:#161b22; border-bottom:1px solid #30363d; padding:11px 24px; display:flex; align-items:center; gap:14px; flex-shrink:0; }
+  header .logo { font-size:18px; font-weight:700; color:#3fb950; }
+  header .tag { font-size:13px; color:#8b949e; border-left:1px solid #30363d; padding-left:13px; }
+  .controls { margin-left:auto; display:flex; align-items:center; gap:10px; }
+  button { background:#21262d; color:#e6edf3; border:1px solid #30363d; border-radius:7px; padding:7px 16px; font-size:13px; cursor:pointer; }
+  button.primary { background:#238636; border-color:#2ea043; } button:hover{ border-color:#58a6ff; }
+  select { background:#21262d; color:#e6edf3; border:1px solid #30363d; border-radius:7px; padding:7px 8px; font-size:12px; }
+
+  #toast { position:fixed; top:74px; left:50%; transform:translateX(-50%) translateY(-16px); background:#238636; color:#fff; font-size:14px; font-weight:600; padding:9px 20px; border-radius:30px; box-shadow:0 8px 30px rgba(35,134,54,.5); opacity:0; transition:.3s; z-index:80; pointer-events:none; }
+  #toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+  .wrap { flex:1; min-height:0; display:flex; flex-direction:column; gap:12px; padding:12px 20px 14px; }
+  /* 命令链 chips */
+  .steps { display:flex; gap:8px; flex-wrap:wrap; flex-shrink:0; }
+  .chip { font-size:12px; color:#8b949e; background:#161b22; border:1px solid #30363d; border-radius:20px; padding:5px 12px; transition:all .25s; }
+  .chip.on { color:#fff; background:#1f6feb; border-color:#388bfd; }
+  .chip.done { color:#3fb950; border-color:#1b4332; }
+
+  .stage { flex:1; min-height:0; display:flex; gap:14px; }
+  @media (max-width:1050px){ .stage{ flex-direction:column; } }
+
+  /* 终端 */
+  .term { flex:1.4; min-width:0; background:#010409; border:1px solid #30363d; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; min-height:0; }
+  .tbar { background:#161b22; border-bottom:1px solid #21262d; padding:9px 13px; display:flex; align-items:center; gap:7px; }
+  .tbar i { width:11px;height:11px;border-radius:50%;display:inline-block;margin-right:5px; }
+  .d1{background:#ff5f56}.d2{background:#ffbd2e}.d3{background:#27c93f}
+  .tbar .tt { margin-left:6px; font-size:12.5px; color:#adbac7; }
+  pre { flex:1; min-height:0; padding:12px 15px; font-family:"SF Mono","Fira Code",Consolas,monospace; font-size:12.5px; line-height:1.6; color:#adbac7; overflow-y:auto; white-space:pre-wrap; word-break:break-word; }
+  pre .ln { display:block; }
+
+  /* GitHub PR 面板 */
+  .pr { flex:1; min-width:0; background:#0d1117; border:1px solid #30363d; border-radius:12px; display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+  .pr-head { background:#161b22; border-bottom:1px solid #21262d; padding:11px 14px; }
+  .pr-head .t { color:#f0f6fc; font-weight:600; font-size:13.5px; }
+  .pr-head .m { color:#8b949e; font-size:12px; margin-top:3px; }
+  .pill { font-size:11px; font-weight:700; padding:2px 9px; border-radius:20px; }
+  .pill.green{background:#0d2818;color:#3fb950}.pill.purple{background:#2a1d4d;color:#bc8cff}
+  .pill.red{background:#3a1418;color:#ff7b72}.pill.yellow{background:#3a2d09;color:#e3b341}.pill.gray{background:#21262d;color:#8b949e}
+  .thread { flex:1; min-height:0; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:12px; }
+  .placeholder { color:#484f58; font-size:13px; font-style:italic; text-align:center; margin-top:30px; }
+  .cmt { border:1px solid #30363d; border-radius:10px; overflow:hidden; background:#0d1117; }
+  .cmt.flash { animation: flash 1.1s ease; }
+  @keyframes flash { 0%{ box-shadow:0 0 0 0 rgba(88,166,255,.6) } 30%{ box-shadow:0 0 0 4px rgba(88,166,255,.45) } 100%{ box-shadow:0 0 0 0 rgba(88,166,255,0) } }
+  .cmt-head { background:#161b22; border-bottom:1px solid #21262d; padding:8px 12px; font-size:12.5px; color:#adbac7; display:flex; align-items:center; gap:8px; }
+  .cmt-head .who { color:#f0f6fc; font-weight:600; } .cmt-head .edited { margin-left:auto; color:#6e7681; font-size:11px; }
+  .cmt-body { padding:11px 13px; font-size:12.5px; }
+  .verdict-row { display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+  .ctab { width:100%; border-collapse:collapse; font-size:11.5px; font-family:"SF Mono",monospace; }
+  .ctab td { padding:3px 5px; border-bottom:1px solid #161b22; color:#adbac7; vertical-align:top; }
+  .ev { margin-top:8px; font-size:11px; color:#58a6ff; }
+  .reaction { margin-top:8px; font-size:12px; color:#8b949e; }
+  .reaction b { color:#3fb950; }
+
+  .g{color:#3fb950}.r{color:#f85149}.y{color:#d29922}.c{color:#58a6ff}.p{color:#bc8cff}.d{color:#6e7681}.b{color:#f0f6fc;font-weight:700}
+  .prompt{color:#3fb950}.cmd{color:#e6edf3}
+  .cursor{display:inline-block;width:8px;height:14px;background:#3fb950;animation:blink 1s steps(1) infinite;vertical-align:-2px;margin-left:1px}
+  @keyframes blink{50%{opacity:0}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">⚡ VerifyFlow 演示</div>
+  <div class="tag">真实命令 · 验收 → 贴 PR 评论 → 反馈纠正 → 评论原地刷新</div>
+  <div class="controls">
+    <select id="speed"><option value="1.6">0.6×</option><option value="1" selected>1×</option><option value="0.5">2×</option><option value="0.25">4×</option></select>
+    <button id="replay" class="primary">▶ 重新播放</button>
+  </div>
+</header>
+<div id="toast"></div>
+
+<div class="wrap">
+  <div class="steps" id="steps">
+    <span class="chip" data-s="0">vf --version</span>
+    <span class="chip" data-s="1">vf doctor</span>
+    <span class="chip" data-s="2">vf run …#66 --comment</span>
+    <span class="chip" data-s="3">vf feedback --pr 66 --criterion AC-5</span>
+    <span class="chip" data-s="4">vf run …#66 (重验)</span>
+  </div>
+
+  <div class="stage">
+    <div class="term">
+      <div class="tbar"><i class="d1"></i><i class="d2"></i><i class="d3"></i><span class="tt mono">terminal — vf</span></div>
+      <pre id="t"></pre>
+    </div>
+    <div class="pr">
+      <div class="pr-head">
+        <div class="t">#66 · docs: bring README up to date with the current CLI surface (IN-791)</div>
+        <div class="m"><span class="pill green" id="pr-state">● Open</span> &nbsp;humanbased-ai/verifyflow · linked IN-791</div>
+      </div>
+      <div class="thread" id="thread"><div class="placeholder">PR 评论会在这里出现 ↓</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let speed = 1, token = 0;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms * speed));
+function line(html){ const p=$("t"); const s=document.createElement("span"); s.className="ln"; s.innerHTML=html; p.appendChild(s); p.scrollTop=p.scrollHeight; }
+async function typeCmd(cmd, my){ const p=$("t"); const ln=document.createElement("span"); ln.className="ln"; ln.innerHTML=`<span class="prompt">$</span> <span class="cmd"></span><span class="cursor"></span>`; p.appendChild(ln); p.scrollTop=p.scrollHeight; const t=ln.querySelector(".cmd"); for(const ch of cmd){ if(my!==token) return; t.textContent+=ch; await sleep(26);} const c=ln.querySelector(".cursor"); if(c) c.remove(); }
+function chip(n){ document.querySelectorAll(".chip").forEach(c=>{ const i=+c.dataset.s; c.classList.toggle("on", i===n); c.classList.toggle("done", i<n); }); }
+function toast(txt){ const t=$("toast"); t.textContent=txt; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 1700*speed); }
+
+// PR 评论(VerifyFlow 交付报告);可被"原地刷新"
+function renderComment(verdict, vClass, ac5, edited){
+  return `<div class="cmt-head"><span>🤖</span><span class="who">verifyflow</span><span>commented · delivery report</span>${edited?'<span class="edited">edited ✎</span>':''}</div>
+  <div class="cmt-body">
+    <div class="verdict-row"><b>VerifyFlow delivery report — IN-791</b></div>
+    <div class="verdict-row">Verdict: <span class="pill ${vClass}">${verdict}</span></div>
+    <table class="ctab">
+      <tr><td class="c">AC-1</td><td class="g">✓ pass</td><td>Quickstart leads with vf demo</td></tr>
+      <tr><td class="c">AC-5</td><td>${ac5}</td><td>onboard saves the key to credentials.json</td></tr>
+      <tr><td class="c">AC-9</td><td class="y">? not_evaluable</td><td>typecheck / test / build pass</td></tr>
+    </table>
+    <div class="ev">📎 evidence: …/pull/66#issuecomment-4646152247 · report.md</div>
+  </div>`;
+}
+
+async function run(){
+  const my=++token; speed=parseFloat($("speed").value);
+  $("t").innerHTML=""; $("thread").innerHTML=`<div class="placeholder">PR 评论会在这里出现 ↓</div>`;
+  $("pr-state").className="pill green"; $("pr-state").textContent="● Open";
+  chip(-1);
+  const g=()=>{ if(my!==token) throw "x"; };
+  try{
+    // ① vf --version
+    chip(0);
+    await typeCmd("vf --version", my); g();
+    line(`verifyflow 0.1.0`);
+    await sleep(700); g();
+
+    // ② vf doctor(真实输出)
+    chip(1);
+    await typeCmd("vf doctor", my); g();
+    line(`  [<span class="g">ok  </span>] gh: <span class="d">found</span>`);
+    line(`  [<span class="g">ok  </span>] LINEAR_API_KEY: <span class="d">set</span>`);
+    line(`  [<span class="g">ok  </span>] claude: <span class="d">found</span>`);
+    line(`  [<span class="g">ok  </span>] uv: <span class="d">found</span>`);
+    line(`  [<span class="y">WARN</span>] sandbox (docker/podman): <span class="d">neither found — probes run on host</span>`);
+    line(`  [<span class="g">ok  </span>] playwright: <span class="d">installed</span>`);
+    line(`<span class="g">doctor: all required tools are ready.</span>`);
+    await sleep(900); g();
+
+    // ③ vf run #66 --comment(真验证 → 贴评论)
+    chip(2);
+    await typeCmd("vf run --pr humanbased-ai/verifyflow#66 --checkout --comment", my); g();
+    line(`<span class="d">[verifyflow]</span> checking out verifyflow#66@3657199…`);
+    await sleep(700); g();
+    line(`<span class="d">[verifyflow]</span> fetched IN-791 · extracted 12 acceptance criteria`);
+    await sleep(700); g();
+    line(`<span class="d">────────────────────────────────────────────</span>`);
+    line(`  <span class="c">AC-1</span>  <span class="g">✓ pass</span>          0.92  Quickstart leads with vf demo`);
+    line(`  <span class="c">AC-5</span>  <span class="r">✗ fail</span>          0.85  onboard saves key to credentials.json`);
+    line(`  <span class="c">AC-9</span>  <span class="y">? not_evaluable</span> 0.80  typecheck / test / build pass`);
+    line(`<span class="d">────────────────────────────────────────────</span>`);
+    line(`  Verdict: <span class="r">needs_fix</span>   <span class="d">(10 pass, 1 fail, 1 not_evaluable)</span>`);
+    await sleep(600); g();
+    line(`<span class="d">[verifyflow] reports: …/runs/IN-791_pr66/report.md</span>`);
+    line(`<span class="d">[verifyflow] evidence:</span> <span class="c">…/pull/66#issuecomment-4646152247</span>`);
+    // → 评论出现在 PR 上
+    toast("📎 VerifyFlow 把交付报告贴到 PR #66");
+    $("thread").innerHTML = `<div class="cmt flash" id="vfc">${renderComment("needs_fix","red",'<span class="r">✗ fail</span>',false)}</div>`;
+    await sleep(1300); g();
+
+    // ④ vf feedback(标记 AC-5 误判)
+    chip(3);
+    await typeCmd("vf feedback --pr 66 --criterion AC-5", my); g();
+    line(`feedback: recorded <span class="c">AC-5</span> (<span class="d">"…onboard saves the Linear key…"</span>)`);
+    line(`  as a <span class="b">false positive</span> for humanbased-ai/verifyflow.`);
+    line(`  <span class="d">Future runs will downgrade a matching criterion to</span> <span class="y">blocked</span>.`);
+    toast("✍️ 标记 AC-5 为误判(记一次,永久生效)");
+    await sleep(1200); g();
+
+    // ⑤ 重验 → 评论原地刷新
+    chip(4);
+    await typeCmd("vf run --pr humanbased-ai/verifyflow#66 --checkout --comment", my); g();
+    line(`<span class="d">[verifyflow]</span> re-verifying… applying feedback`);
+    await sleep(700); g();
+    line(`  <span class="c">AC-5</span>  <span class="y">🚧 blocked</span>  <span class="d">Downgraded from fail → blocked: flagged via vf feedback</span>`);
+    line(`  Verdict: <span class="y">manual_review_required</span>   <span class="d">(不再是 needs_fix)</span>`);
+    await sleep(500); g();
+    toast("🔄 PR 上那条评论原地刷新了");
+    const c=$("thread"); c.innerHTML = `<div class="cmt flash" id="vfc">${renderComment("manual_review_required","yellow",'<span class="y">🚧 blocked</span>',true)}<div class="cmt-body" style="border-top:1px solid #21262d"><div class="reaction">AC-5 <b>fail → blocked</b> · 整体 <b>needs_fix → manual_review_required</b> · merge gate 🟢 放行</div></div></div>`;
+    chip(5);
+    await sleep(400); g();
+    toast("✅ 判错 → 一句话纠正 → PR 评论自动更新");
+  }catch(e){}
+}
+$("replay").addEventListener("click", run);
+$("speed").addEventListener("change", e=>{ speed=parseFloat(e.target.value); });
+run();
+</script>
+</body>
+</html>

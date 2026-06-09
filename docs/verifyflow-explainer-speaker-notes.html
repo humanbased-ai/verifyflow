@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VerifyFlow 讲解 · 配套提词稿（讲解者用）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; background: #0d1117; color: #e6edf3; line-height: 1.6; }
+  code, .mono { font-family: "SF Mono", "Fira Code", Consolas, monospace; }
+  a { color: #58a6ff; text-decoration: none; }
+
+  header { background: #161b22; border-bottom: 1px solid #30363d; padding: 18px 32px; position: sticky; top: 0; z-index: 50; }
+  header .logo { font-size: 18px; font-weight: 700; color: #58a6ff; letter-spacing: -0.4px; }
+  header .tag { font-size: 13px; color: #8b949e; margin-top: 4px; }
+
+  .wrap { max-width: 1720px; margin: 0 auto; padding: 22px 28px 64px; }
+
+  /* 横向网格:提词卡左→右成行排列(卡1·2·3 一行,再 4·5·6…),一屏看一大片 */
+  .deck { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 1280px){ .deck { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 820px){ .deck { grid-template-columns: 1fr; } }
+
+  /* 使用说明条 */
+  .howto { background: #11202b; border: 1px solid #1f4d5e; border-radius: 12px; padding: 16px 20px; margin-bottom: 26px; font-size: 14px; color: #c9d1d9; }
+  .howto b { color: #79c0ff; }
+
+  /* 开场策略 */
+  .strategy { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 22px 24px; margin-bottom: 30px; }
+  .strategy h2 { font-size: 18px; color: #f0f6fc; margin-bottom: 14px; }
+  .pitch { background: #010409; border: 1px solid #21262d; border-left: 3px solid #3fb950; border-radius: 8px; padding: 12px 16px; font-size: 15px; color: #e6edf3; margin: 10px 0 16px; }
+  .aud { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px){ .aud { grid-template-columns: 1fr; } }
+  .aud div { background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 12px 14px; font-size: 13px; color: #8b949e; }
+  .aud div b { display: block; color: #f0f6fc; font-size: 13.5px; margin-bottom: 5px; }
+
+  /* 提词卡 */
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 16px 18px; margin: 0; border-left: 4px solid #30363d; }
+  .card.tech { border-left-color: #58a6ff; }
+  .card.mgmt { border-left-color: #d29922; }
+  .card.gen  { border-left-color: #8b949e; }
+  .chead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .num { font-size: 12px; font-weight: 700; color: #6e7681; }
+  .ctitle { font-size: 18px; font-weight: 700; color: #f0f6fc; letter-spacing: -0.3px; }
+  .meta { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .time { font-size: 11px; color: #8b949e; background: #21262d; border-radius: 10px; padding: 3px 9px; }
+  .anchor { font-size: 11px; color: #58a6ff; background: #11202b; border: 1px solid #1f4d5e; border-radius: 10px; padding: 3px 9px; }
+  .badge { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; border-radius: 10px; padding: 3px 9px; font-weight: 700; }
+  .b-tech { background: #0d2a4d; color: #79c0ff; }
+  .b-mgmt { background: #3a2d09; color: #e3b341; }
+  .b-gen  { background: #21262d; color: #8b949e; }
+
+  .goal { font-size: 14.5px; color: #c9d1d9; margin-bottom: 14px; }
+  .goal b { color: #3fb950; }
+
+  .lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #6e7681; margin: 14px 0 6px; display: flex; align-items: center; gap: 6px; }
+  ul { list-style: none; }
+  li { font-size: 14px; color: #c9d1d9; padding: 3px 0 3px 18px; position: relative; }
+  li::before { content: "▸"; position: absolute; left: 0; color: #484f58; }
+  .say li::before { content: "🗣"; left: -2px; font-size: 11px; }
+  .hook { background: #010409; border: 1px solid #21262d; border-left: 3px solid #58a6ff; border-radius: 8px; padding: 10px 14px; font-size: 14px; color: #e6edf3; margin: 8px 0; }
+  .hook b { color: #79c0ff; }
+  .qa { margin-top: 6px; }
+  .qa .q { font-size: 13.5px; color: #f0f6fc; font-weight: 600; margin-top: 8px; }
+  .qa .a { font-size: 13.5px; color: #8b949e; padding-left: 14px; }
+  .qa .a::before { content: "↳ "; color: #484f58; }
+  .num-strong { color: #3fb950; font-weight: 700; }
+
+  pre { background: #010409; border: 1px solid #21262d; border-radius: 8px; padding: 10px 14px; overflow-x: auto; font-size: 12.5px; color: #adbac7; margin: 6px 0; }
+
+  /* 全程纪律 */
+  .discipline { background: #2d1416; border: 1px solid #5e2326; border-radius: 12px; padding: 20px 24px; margin: 30px 0 0; }
+  .discipline h2 { font-size: 17px; color: #ffa198; margin-bottom: 12px; }
+  .discipline li { color: #f0c0bd; } .discipline li::before { content: "⚠"; color: #f85149; }
+
+  .end-note { text-align: center; color: #6e7681; font-size: 12px; margin-top: 34px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">VerifyFlow · 配套提词稿</div>
+  <div class="tag">讲解者专用 · 对应 verifyflow-explainer.html · 逐屏怎么讲 / 被问怎么答</div>
+</header>
+
+<div class="wrap">
+
+  <div class="howto">
+    <b>怎么用这份稿子：</b>把 <code>verifyflow-explainer.html</code> 投屏给观众，这份提词稿放你手边或另一块屏。
+    每张卡对应演示页的一屏，颜色边表示听众侧重 —
+    <span style="color:#58a6ff">蓝＝技术细节</span> ·
+    <span style="color:#d29922">黄＝价值/管理视角</span> ·
+    <span style="color:#8b949e">灰＝通用/过场</span>。
+    时间紧就只讲蓝+黄的核心屏；🗣 是可以照着说的口播。<b>全程纪律</b>见最底部，是这次讲解的灵魂。
+  </div>
+
+  <div class="strategy">
+    <h2>开场 30 秒：电梯陈述（背下来）</h2>
+    <div class="pitch">
+      "代码审查回答<b>『写得对不对』</b>，VerifyFlow 回答<b>『工单要求的事，到底做到了没』</b>——
+      它把 Linear 工单的验收标准逐条拎出来，在真实 checkout 上<b>实际执行</b>验证、留下<b>证据</b>，给出一个能进合并门的交付判决。"
+    </div>
+    <h2 style="font-size:15px;margin-top:6px;">看人调主线</h2>
+    <div class="aud">
+      <div><b>👩‍💻 工程师</b>"真执行、不读 diff 猜"+三个验证级别+证据可追溯。重点屏：05、06、09、10。</div>
+      <div><b>👔 管理 / Lead</b>替掉"人肉核对工单"、能进合并门做无人值守闭环、诚实的收益边界。重点屏：04、07、10、13。</div>
+      <div><b>🧪 想试用的人</b>装上拿到 vf、四条命令起步、auto 选级别。重点屏：08、09，结尾给 npx 一行。</div>
+    </div>
+  </div>
+
+  <div class="deck">
+
+  <!-- 1 -->
+  <div class="card gen">
+    <div class="chead"><span class="num">屏 01</span><span class="ctitle">开场 / Hero — 用证据说话</span>
+      <span class="meta"><span class="badge b-gen">过场</span><span class="time">~30s</span><span class="anchor">#top</span></span></div>
+    <div class="goal">目的：<b>一句话定位</b>，让全场知道接下来 10 分钟在解决哪个具体问题。</div>
+    <div class="lbl">🗣 口播</div>
+    <ul class="say">
+      <li>念电梯陈述那句，然后停一拍。</li>
+      <li>"今天不讲它怎么实现，讲三件事：<b>是什么、有没有用、怎么用</b>。"</li>
+    </ul>
+    <div class="hook">钩子：先抛痛点——<b>"PR 看着没问题就合了，但工单里要求的那几条，真没人逐条核对过。"</b> 大多数人会点头。</div>
+  </div>
+
+  <!-- 2 -->
+  <div class="card gen">
+    <div class="chead"><span class="num">屏 02</span><span class="ctitle">这是什么 — 一句话讲清楚</span>
+      <span class="meta"><span class="badge b-gen">通用</span><span class="time">~1min</span><span class="anchor">#what</span></span></div>
+    <div class="goal">目的：把"它<b>不是</b>什么"说清，避免被误当成测试工具或代码审查。</div>
+    <div class="lbl">🗣 口播</div>
+    <ul class="say">
+      <li>"它<b>不</b>再跑一遍测试，<b>不</b>看代码风格。"</li>
+      <li>"它做四件事：抽<b>验收标准</b> → 真 checkout <b>实际执行</b> → 留<b>证据</b> → 出<b>交付判决</b>，而且<b>积累记忆，越用越准</b>。"</li>
+    </ul>
+    <div class="hook">一句记忆点：<b>"代码审查说『写得对』，VerifyFlow 说『做到了没』。"</b></div>
+  </div>
+
+  <!-- 3 -->
+  <div class="card gen">
+    <div class="chead"><span class="num">屏 03</span><span class="ctitle">目录 — 这页讲什么</span>
+      <span class="meta"><span class="badge b-gen">过场</span><span class="time">~20s</span><span class="anchor">#toc</span></span></div>
+    <div class="goal">目的：给地图，别逐条念。手一划带过。</div>
+    <div class="lbl">🗣 口播</div>
+    <ul class="say">
+      <li>"分这么几块——定位、级别、效率、怎么装怎么用、真实案例、横向对比、边界。挑你们最关心的看。"</li>
+    </ul>
+  </div>
+
+  <!-- 4 -->
+  <div class="card mgmt">
+    <div class="chead"><span class="num">屏 04</span><span class="ctitle">三件套定位 — 各管一段，不重叠</span>
+      <span class="meta"><span class="badge b-mgmt">价值</span><span class="time">~1.5min</span><span class="anchor">#fit</span></span></div>
+    <div class="goal">目的：划清 <b>Symphony / Crosscheck / VerifyFlow</b> 的边界——这是最容易被混淆、也最显价值的一屏。</div>
+    <div class="lbl">🗣 口播</div>
+    <ul class="say">
+      <li>"<b>Symphony</b> 派活，<b>Crosscheck</b> 管『代码写得对不对、能不能合』，<b>VerifyFlow</b> 管『工单承诺兑现没』。"</li>
+      <li>"关键区别——<b>代码很漂亮但功能没做全</b>：Crosscheck 可能放行，VerifyFlow 会拦。"</li>
+    </ul>
+    <div class="hook">这屏是把 VerifyFlow 和"普通 code review"切开的地方，<b>慢一点讲</b>。</div>
+    <div class="qa">
+      <div class="q">Q：这不就是 code review 多一步？</div>
+      <div class="a">不同问题。review 看代码质量；VF 看"工单这几条做到没"，靠真执行，不看 diff。</div>
+    </div>
+  </div>
+
+  <!-- 5 -->
+  <div class="card tech">
+    <div class="chead"><span class="num">屏 05</span><span class="ctitle">怎么运转 — 一次验证里的 6 步</span>
+      <span class="meta"><span class="badge b-tech">技术</span><span class="time">~1.5min</span><span class="anchor">#run</span></span></div>
+    <div class="goal">目的：让人信"它真的跑了"，并埋下"保守是设计原则"这条主线。</div>
+    <div class="lbl">🗣 口播（顺着 6 个图标走）</div>
+    <ul class="say">
+      <li>"①抽 AC → ②<b>checkout PR head 真跑</b>命令/测试/浏览器，不是读 diff 猜 → ③日志/截图/trace 全存档 → ④逐条判 pass/fail/partial/blocked/not_evaluable → ⑤合并门 → ⑥测试点进记忆。"</li>
+    </ul>
+    <div class="hook"><b>"保守是设计原则：拿不准就判 blocked / not_evaluable，绝不编一个假失败。证据不够就老实说『没法验，交给人』。"</b> ← 这句反复出现，是它的人格。</div>
+    <div class="qa">
+      <div class="q">Q：我怎么知道它真跑了、不是 LLM 编的？</div>
+      <div class="a">每条判决都能追到证据：probe 日志里有 <code>$ 命令 / cwd / exit / executed:true</code> + 原始输出；UI 步有截图。没真跑过的会标成 blocked，不会假装通过。</div>
+    </div>
+  </div>
+
+  <!-- 6 -->
+  <div class="card tech">
+    <div class="chead"><span class="num">屏 06</span><span class="ctitle">三个级别 — functional / ui / journey</span>
+      <span class="meta"><span class="badge b-tech">技术</span><span class="time">~2min</span><span class="anchor">#levels</span></span></div>
+    <div class="goal">目的：讲清"同一条标准能验浅也能验深"，以及 <b>auto 会自动选、跑不了就降级并说明</b>。</div>
+    <div class="lbl">🗣 口播</div>
+    <ul class="say">
+      <li><b>functional</b>：后端/CLI/库——真 checkout 跑命令探针 + 项目自己的测试，看退出码。最快最稳。</li>
+      <li><b>ui</b>：Playwright 开<b>真浏览器</b>，AI 驱动点击/填表/读页面；需要跑着的 app（<code>--base-url</code>），登录态用 <code>--ui-auth</code>。</li>
+      <li><b>journey</b>：跨多步、跨前后端的完整旅程（注册→下单→看到结果）。最慢，最接近真实。</li>
+      <li><b>auto</b>：读工单挑级别；<b>没有浏览器就降级到 functional，并在报告里说明原因——不假装验过</b>。</li>
+    </ul>
+    <div class="hook">举具体例子最好懂：<b>"『点导出按钮能下载 CSV』就是 ui；『用户从登录到支付完成』就是 journey。"</b></div>
+    <div class="qa">
+      <div class="q">Q：随机性问题？（浏览器/AI 驱动）</div>
+      <div class="a">承认：结果有随机性、已立项在修；journey 里一个 fail 要"多次独立重跑能复现"才算数，正是为了压住抖动。</div>
+    </div>
+  </div>
+
+  <!-- 7 -->
+  <div class="card mgmt">
+    <div class="chead"><span class="num">屏 07</span><span class="ctitle">提没提效率 — 含真实数据 + 诚实 caveat</span>
+      <span class="meta"><span class="badge b-mgmt">价值</span><span class="time">~2min</span><span class="anchor">#eff</span></span></div>
+    <div class="goal">目的：讲清它替掉的是"人肉确认工单"，并能拼成<b>无人值守闭环</b>；同时<b>主动亮出数据的局限</b>（这反而加分）。</div>
+    <div class="lbl">🗣 口播</div>
+    <ul class="say">
+      <li>"没它的时候：reviewer 看完代码还得翻工单逐条核对、手动拉分支跑一遍点一遍——经验还留不下来。"</li>
+      <li>"有它之后：标准自动逐条核对带证据贴回 PR，失败能阻断合并，测试点进记忆下次秒复用。"</li>
+      <li>闭环一句话：<code>vf watch --auto-merge</code> 盯着 Crosscheck 批过的 PR，验证通过就 squash-merge——<b>从工单到已验证合并，中间可以没有人</b>。</li>
+    </ul>
+    <div class="lbl">📊 真实指标（可被核对，别夸大）</div>
+    <ul>
+      <li><span class="num-strong">39.1%</span> 记忆复用率 · <span class="num-strong">47.8%</span> 标准 pass 率 · <span class="num-strong">37%</span> not_evaluable（也暴露了保守的短板）</li>
+      <li>4 次 dogfood · 46 条标准 · verdict：needs_fix×2 / manual_review_required×2</li>
+    </ul>
+    <div class="hook">主动认怂这句一定要说，会显著加可信度：<b>"还没有『省了多少工时』的规模化实测——这 4 次都是给自己验，样本小。机制跑通了，硬收益要真实团队 repo 跑一段才有。"</b></div>
+  </div>
+
+  <!-- 8 -->
+  <div class="card gen">
+    <div class="chead"><span class="num">屏 08</span><span class="ctitle">安装 — 拿到 vf 命令</span>
+      <span class="meta"><span class="badge b-gen">过场</span><span class="time">~30s</span><span class="anchor">#install</span></span></div>
+    <div class="goal">目的：试用者才细讲，其他场合一句带过。</div>
+    <div class="lbl">🗣 口播</div>
+    <ul class="say">
+      <li>"三种：<b>A</b> 零安装 <code>npx</code> 先试一眼；<b>B</b> clone + <code>npm link</code> 拿到全局 <code>vf</code>（推荐）；<b>C</b> npm 全局（还没发布）。"</li>
+      <li>提一句前置：Node≥20、<code>gh</code> 已登录、读 Linear 要 <code>LINEAR_API_KEY</code>（或 <code>--fixtures</code> 离线）。</li>
+    </ul>
+    <div class="hook">方式 B 的坑先提醒：<b>"git pull 之后要 <code>npm run build</code>，否则 vf 跑的是旧编译产物。"</b></div>
+  </div>
+
+  <!-- 9 -->
+  <div class="card tech">
+    <div class="chead"><span class="num">屏 09</span><span class="ctitle">怎么用 — 本次真实跑过的命令</span>
+      <span class="meta"><span class="badge b-tech">技术</span><span class="time">~1.5min</span><span class="anchor">#use</span></span></div>
+    <div class="goal">目的：强调"这些<b>不是示意，是本项目真跑过的命令和输出</b>"。</div>
+    <div class="lbl">🗣 口播（四条主线命令）</div>
+    <ul class="say">
+      <li>① <code>vf doctor</code> 先体检环境。</li>
+      <li>② <code>vf watch --auto-merge</code> 挂着自动盯——念那段真实 tick 输出，"Crosscheck 批了 #66，下一轮它自动接手验证。"</li>
+      <li>③ <code>vf run --pr …#66 --checkout --comment</code> 验某个 PR、真 checkout、把判定表贴回评论。</li>
+    </ul>
+    <pre>AC-1 ✓ pass          0.92  Quickstart leads with vf demo …
+AC-5 ✗ fail          0.85  Setup states vf onboard saves the key …
+AC-9 ? not_evaluable 0.80  typecheck / test / build pass …</pre>
+    <div class="hook">指着 <code>--comment</code> 说：<b>"判定表直接贴回 PR，证据留在 GitHub 上，不是聊天框里看一眼就没了。"</b></div>
+  </div>
+
+  <!-- 10 -->
+  <div class="card mgmt">
+    <div class="chead"><span class="num">屏 10</span><span class="ctitle">真实案例 — dogfood，好坏都暴露</span>
+      <span class="meta"><span class="badge b-mgmt">价值</span><span class="time">~2min</span><span class="anchor">#case</span></span></div>
+    <div class="goal">目的：全场<b>最有说服力</b>的一屏——真实发生、不是演示数据。讲完三个小故事。</div>
+    <div class="lbl">🗣 口播（A→B→C 三段）</div>
+    <ul class="say">
+      <li><b>A 抓到真问题</b>（<code>--version</code> PR）：Crosscheck 标 NEEDS WORK——缺测试、help 没列 --version、import 风格不一致，全真该补，补完 APPROVE 合并。</li>
+      <li><b>B 暴露误判</b>（README PR）：验文档型标准时去跑 <code>vf onboard</code>，<b>沙箱把密钥剥了 → exit 1 → 误判成失败</b>，其实 README 是对的。这个误报被真实复现了。</li>
+      <li><b>C 误判催生新能力</b>：为解决 B，当场设计并合入<b>人类反馈回路</b> <code>vf feedback</code>——标一次 AC-5，重验后那条从 fail 降为 blocked，整体从 needs_fix 变 manual_review_required，PR 评论自动刷新。<b>判错→一句话纠正→永久生效。</b></li>
+    </ul>
+    <div class="hook">收这屏的金句：<b>"它不完美——但它把『判错了』也变成了能被一句话修正、且会被记住的事。"</b></div>
+  </div>
+
+  <!-- 11 -->
+  <div class="card gen">
+    <div class="chead"><span class="num">屏 11</span><span class="ctitle">总体对比 — vs LLM agent / CI / 人工</span>
+      <span class="meta"><span class="badge b-gen">通用</span><span class="time">~1min</span><span class="anchor">#vs</span></span></div>
+    <div class="goal">目的：别逐格念表。挑 3 个差异化维度 + 1 个诚实短板。</div>
+    <div class="lbl">🗣 口播（挑这几行）</div>
+    <ul class="say">
+      <li>"绑的是<b>工单验收标准</b>，不是 diff/测试——这是 CI 不知道的事。"</li>
+      <li>"<b>真执行 + 证据 + 记忆</b>，比无状态 LLM judge 扎实；还能<b>接合并门</b>。"</li>
+      <li>诚实短板："『内部逻辑型』标准它会瞎编 shell 命令，不如直接跑单测准；而且偏保守，一堆 not_evaluable 要人收尾。"</li>
+    </ul>
+    <div class="hook"><b>"它是补位，不是顶替 CI 和代码审查。"</b></div>
+  </div>
+
+  <!-- 12 -->
+  <div class="card tech">
+    <div class="chead"><span class="num">屏 12</span><span class="ctitle">vs 现成 skill — verify / CodeRabbit / Playwright-MCP</span>
+      <span class="meta"><span class="badge b-tech">技术</span><span class="time">~1.5min</span><span class="anchor">#vs-skills</span></span></div>
+    <div class="goal">目的：用两个案例说清差异轴——<b>绑不绑工单 / 执不执行 / 留不留证据记忆 / 接不接合并门</b>；并大方承认它输的地方。</div>
+    <div class="lbl">🗣 口播</div>
+    <ul class="say">
+      <li>案例①（功能）："CodeRabbit 读 diff 不执行、不知道工单那 12 条；verify skill 跑完即忘不贴回 PR；VF 自动抽 12 条→逐条跑→贴回→AC-5 误判被 feedback 纠正。"</li>
+      <li>案例②（UI）："Playwright-MCP 能开浏览器点按钮、而且最强，但它不知道这对应工单哪条、不出判决、不留记忆、不接门；<b>VF 的 ui 级别底层就建在 Playwright 上</b>，加的是『绑工单→判交付→留证据→进门』那一层。"</li>
+    </ul>
+    <div class="hook">承认输的地方（务必说）：<b>"代码/安全审查深度——它根本不审，CodeRabbit 完胜；速度——它慢（checkout+执行约 1 分钟/次）；成熟度——早期、4 次 dogfood、还没发 npm。"</b></div>
+    <div class="qa">
+      <div class="q">Q：那我为什么不直接用 Playwright-MCP？</div>
+      <div class="a">不是竞争关系。要"开浏览器干活"用它；要"这步证明了工单某条标准、且能进合并门"才用 VF——VF 在它上面加判决层。</div>
+    </div>
+  </div>
+
+  <!-- 13 -->
+  <div class="card mgmt">
+    <div class="chead"><span class="num">屏 13</span><span class="ctitle">边界 + 收尾 — 它不做什么</span>
+      <span class="meta"><span class="badge b-mgmt">价值</span><span class="time">~1min</span><span class="anchor">#limit</span></span></div>
+    <div class="goal">目的：用边界反向强化定位，干净收尾。</div>
+    <div class="lbl">🗣 口播</div>
+    <ul class="say">
+      <li>"不审代码（Crosscheck）、不拆工单派 agent（Symphony）、<b>不动钱不发生产邮件不做不可逆副作用</b>、不替代 CI。"</li>
+    </ul>
+    <div class="hook">收尾金句：<b>"在『Symphony 写 → Crosscheck 审 → VerifyFlow 验』这条链上，它补的是最后也最关键的一环——交付是否为真。"</b></div>
+    <div class="lbl">🎬 留给观众的一句 + 行动</div>
+    <ul class="say">
+      <li>"想自己跑一眼，离线零配置：<code>npx github:humanbased-ai/verifyflow demo</code>。"</li>
+    </ul>
+  </div>
+
+  </div><!-- /.deck -->
+
+  <!-- 全程纪律 -->
+  <div class="discipline">
+    <h2>⚠ 全程纪律（这次讲解的灵魂，别破功）</h2>
+    <ul>
+      <li><b>不夸大收益</b>：没有工时数据就说没有。"机制跑通、规模化待验"是诚实且更可信的说法。</li>
+      <li><b>主动认短板</b>：随机性、偏保守(37% not_evaluable)、对内部逻辑型标准会瞎编命令、还没发 npm——被问之前自己先说。</li>
+      <li><b>"真执行 + 证据"是主心骨</b>：任何"它怎么不被骗"的质疑，都回到 probe 日志(exit/executed:true)和截图。</li>
+      <li><b>定位别漂移</b>：它不是 code review、不是 CI、不是测试框架——是"工单兑现没"的交付判决层。</li>
+      <li><b>对比要公平</b>：每个对比对象都先肯定它强在哪，再讲 VF 的差异点。不踩别人抬自己。</li>
+    </ul>
+  </div>
+
+  <div class="end-note">配套提词稿 · 与 verifyflow-explainer.html 同步 · 数字/命令均取自演示页中标注的真实 dogfood 运行</div>
+
+</div>
+</body>
+</html>
