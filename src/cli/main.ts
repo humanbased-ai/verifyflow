@@ -39,7 +39,7 @@ import { runInit } from "./init.js";
 import { runDoctor, renderDoctorReport } from "./doctor.js";
 import { runOnboard, renderOnboardReport } from "./onboard.js";
 import { memoryLs, memoryShow, memoryClear, isValidRepoArg } from "./memory.js";
-import { recordFalsePositiveFromRun, feedbackLs, feedbackClear, listRecentRuns, latestRunForPr } from "./feedback.js";
+import { recordFalsePositiveFromRun, setProbeFromRun, feedbackLs, feedbackClear, listRecentRuns, latestRunForPr } from "./feedback.js";
 import { captureIssue, issueContextFromRun, issueLs, renderIssue } from "./issue.js";
 import { showRun, showSignal, isUnsafeRunId } from "./inspect.js";
 import {
@@ -123,6 +123,10 @@ Usage:
   vf feedback --pr <N> --criterion <id> [--note <text>]
                                       Flag a criterion on the latest run for PR <N> (no run id
                                       needed). Or name the run exactly: vf feedback <runId> --criterion <id>.
+  vf feedback --pr <N> --criterion <id> --probe '<cmd>' [--expect '<substr>'] [--expect-exit <n>]
+                                      Instead of suppressing, give the criterion a CORRECT probe so
+                                      the next run actually verifies it (can pass with evidence,
+                                      not just blocked) (IN-808).
   vf feedback ls                      List recorded false-positive feedback per repo.
   vf feedback clear [--repo <o/r>] [--yes]
                                       Prune recorded false-positive feedback (one repo, or all).
@@ -941,6 +945,30 @@ async function cmdFeedback(args: Args, positionals: string[]): Promise<number> {
     console.error("error: vf feedback needs --criterion <id> (the AC id from the run's report).");
     return 2;
   }
+
+  // --probe: supply a corrected probe so the criterion actually verifies next run (IN-808),
+  // instead of just suppressing the false positive to `blocked`.
+  const probeCmd = str(args.probe);
+  if (probeCmd) {
+    let expectExitCode: number | undefined;
+    const ee = str(args["expect-exit"]);
+    if (ee !== undefined) {
+      expectExitCode = Number(ee);
+      if (!Number.isInteger(expectExitCode)) {
+        console.error("error: --expect-exit must be an integer exit code.");
+        return 2;
+      }
+    }
+    const probe = { command: probeCmd, expectSubstring: str(args.expect), expectExitCode, fromTicket: true };
+    const res = await setProbeFromRun(store, outputRoot, runId, criterionId, probe, new Date().toISOString());
+    if (!res.ok) {
+      console.error(res.text);
+      return 1;
+    }
+    console.log(res.text);
+    return 0;
+  }
+
   const res = await recordFalsePositiveFromRun(store, outputRoot, runId, criterionId, new Date().toISOString(), note);
   if (!res.ok) {
     console.error(res.text);

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { MemoryStore, FeedbackRecord } from "../memory/store.js";
-import type { RunReport } from "../types.js";
+import type { Probe, RunReport } from "../types.js";
 import { runDirFor, isUnsafeRunId } from "./inspect.js";
 
 /**
@@ -111,6 +111,49 @@ export async function recordFalsePositiveFromRun(
     text:
       `feedback: recorded ${criterionId} ("${cr.criterion.slice(0, 60)}${cr.criterion.length > 60 ? "…" : ""}") ` +
       `as a false positive for ${repo}. Future runs will downgrade a matching criterion to blocked.`,
+  };
+}
+
+/**
+ * Set a corrected probe for a criterion (IN-808). Resolves the criterion text + repo from the run's
+ * report.json and stores it as a reusable, authoritative test point, so the next `vf run` runs this
+ * probe for the matching criterion and produces a real pass/fail with evidence (not just `blocked`).
+ */
+export async function setProbeFromRun(
+  store: MemoryStore,
+  outputRoot: string,
+  runId: string,
+  criterionId: string,
+  probe: Probe,
+  now: string,
+): Promise<RecordResult> {
+  if (isUnsafeRunId(runId)) {
+    return { ok: false, text: `feedback: "${runId}" is not a valid run id (must be a single run directory name).` };
+  }
+  const file = path.join(runDirFor(outputRoot, runId), "report.json");
+  let report: RunReport;
+  try {
+    report = JSON.parse(await fs.readFile(file, "utf8")) as RunReport;
+  } catch {
+    return { ok: false, text: `feedback: no report.json for run "${runId}" under ${path.join(outputRoot, "runs")}.` };
+  }
+  const cr = report.criterionResults?.find((c) => c.criterionId === criterionId);
+  if (!cr) {
+    const ids = (report.criterionResults ?? []).map((c) => c.criterionId).join(", ");
+    return { ok: false, text: `feedback: run "${runId}" has no criterion "${criterionId}" (have: ${ids}).` };
+  }
+  const repo = report.request.repo;
+  await store.upsertTestPoint({ repo, component: "", criterionText: cr.criterion, method: "backend", probe, now });
+  const exp = [
+    probe.expectExitCode !== undefined ? `exit ${probe.expectExitCode}` : "",
+    probe.expectSubstring ? `output contains "${probe.expectSubstring}"` : "",
+  ].filter(Boolean).join(", ");
+  return {
+    ok: true,
+    repo,
+    text:
+      `feedback: set probe for ${criterionId} on ${repo} → \`${probe.command}\`${exp ? ` (expect ${exp})` : ""}.\n` +
+      `Future runs will run this probe for that criterion — it can now pass with evidence, not just blocked.`,
   };
 }
 
