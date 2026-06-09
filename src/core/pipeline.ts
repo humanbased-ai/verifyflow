@@ -282,11 +282,24 @@ export async function runVerification(
   // Load any human false-positive corrections for this repo (IN-792) and hand the engine a matcher
   // so a flagged criterion's fail/partial is downgraded to blocked instead of re-flagged.
   const feedbackRecords = await deps.memory.loadFeedback(pr.repo);
+  // Verdict cache (IN-801): reuse a prior verdict for identical probe evidence so a re-run over
+  // unchanged code is deterministic (the stochastic LLM review is skipped on a cache hit). The
+  // engine reads/writes through this adapter; we persist the (possibly grown) cache afterwards.
+  const verdictCache = await deps.memory.loadVerdictCache(pr.repo);
+  let verdictCacheDirty = false;
   const verdict = await decideVerdict(criteria, plan, results, deps.llm, {
     feedbackMatch: feedbackRecords.length
       ? (text) => matchFeedbackRecords(feedbackRecords, text)
       : undefined,
+    verdictCache: {
+      get: (h) => verdictCache[h],
+      put: (h, v) => {
+        verdictCache[h] = { ...v, cachedAt: now() };
+        verdictCacheDirty = true;
+      },
+    },
   });
+  if (verdictCacheDirty) await deps.memory.saveVerdictCache(pr.repo, verdictCache);
   deps.onProgress?.(`verdict: ${verdict.runVerdict}`);
 
   // Degraded cap (IN-570): without an independent acceptance source, a positive outcome
