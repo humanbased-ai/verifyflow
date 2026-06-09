@@ -17,7 +17,7 @@ import { runUiChecks } from "../harness/ui/runUiChecks.js";
 import { type JourneyHarness, UnavailableJourneyHarness } from "../harness/journey/journeyHarness.js";
 import { runJourneyChecks } from "../harness/journey/runJourneyChecks.js";
 import type { LlmClient } from "../backends/llm.js";
-import { type MemoryStore, matchFeedbackRecords, isReusableProbeResult } from "../memory/store.js";
+import { type MemoryStore, matchFeedbackRecords, isReusableProbeResult, VERDICT_CACHE_VERSION } from "../memory/store.js";
 import type { EventLog } from "../memory/eventLog.js";
 import type { GithubClient, PrRef } from "./context/github.js";
 import { parsePrRef } from "./context/github.js";
@@ -282,11 +282,30 @@ export async function runVerification(
   // Load any human false-positive corrections for this repo (IN-792) and hand the engine a matcher
   // so a flagged criterion's fail/partial is downgraded to blocked instead of re-flagged.
   const feedbackRecords = await deps.memory.loadFeedback(pr.repo);
+  // Verdict cache (IN-801): reuse a prior verdict for identical probe evidence so a re-run over
+  // unchanged code is deterministic (the stochastic LLM review is skipped on a cache hit). The
+  // engine reads/writes through this adapter; we persist the (possibly grown) cache afterwards.
+  // NOTE: load→mutate→save is last-writer-wins; two concurrent runs on the same repo can drop each
+  // other's new entries. Acceptable while runs are serialized (a dropped entry just re-computes).
+  const verdictCache = await deps.memory.loadVerdictCache(pr.repo);
+  let verdictCacheDirty = false;
   const verdict = await decideVerdict(criteria, plan, results, deps.llm, {
     feedbackMatch: feedbackRecords.length
       ? (text) => matchFeedbackRecords(feedbackRecords, text)
       : undefined,
+    verdictCache: {
+      // A different cache version is treated as a miss (stale entry ignored + overwritten).
+      get: (h) => {
+        const e = verdictCache[h];
+        return e && e.v === VERDICT_CACHE_VERSION ? e : undefined;
+      },
+      put: (h, entry) => {
+        verdictCache[h] = { ...entry, v: VERDICT_CACHE_VERSION, cachedAt: now() };
+        verdictCacheDirty = true;
+      },
+    },
   });
+  if (verdictCacheDirty) await deps.memory.saveVerdictCache(pr.repo, verdictCache);
   deps.onProgress?.(`verdict: ${verdict.runVerdict}`);
 
   // Degraded cap (IN-570): without an independent acceptance source, a positive outcome

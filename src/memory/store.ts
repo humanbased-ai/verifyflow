@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import type { CriterionResultValue, FailureCategory, Probe, TestPoint } from "../types.js";
 
 // Slug a repo string into a single safe path segment. Dots are kept on purpose — GitHub
@@ -108,6 +109,54 @@ export function matchFeedbackRecords(
 export function isReusableProbeResult(result: CriterionResultValue): boolean {
   return result !== "blocked";
 }
+
+/**
+ * The probe evidence a verdict is computed from (IN-801). A criterion's verdict is a deterministic
+ * function of its text + this evidence, so caching by a hash of them makes a re-run over identical
+ * evidence reuse the prior verdict instead of re-asking the (stochastic) LLM.
+ */
+export interface ProbeEvidence {
+  command: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Stable fingerprint of (criterion text + probe evidence). Returns undefined when there is no
+ * executed probe — a "no probe" result has no stable evidence, so it is intentionally not cached.
+ * Output is truncated before hashing so a giant log doesn't change the key on trailing noise.
+ */
+export function evidenceHash(criterionText: string, evidence: ProbeEvidence | undefined): string | undefined {
+  if (!evidence) return undefined;
+  const payload = JSON.stringify({
+    c: norm(criterionText),
+    cmd: evidence.command,
+    code: evidence.exitCode,
+    out: (evidence.stdout ?? "").slice(0, 4000),
+    err: (evidence.stderr ?? "").slice(0, 4000),
+  });
+  return createHash("sha256").update(payload).digest("hex").slice(0, 32);
+}
+
+/**
+ * Bump when the cached verdict's shape or the evidenceHash payload changes (IN-801 review): readers
+ * treat an entry with a different `v` as a miss, so stale entries are ignored and overwritten
+ * instead of silently served.
+ */
+export const VERDICT_CACHE_VERSION = 1;
+
+/** A cached criterion verdict (IN-801): the LLM-independent fields, reused on an evidence-hash hit. */
+export interface VerdictCacheEntry {
+  v: number;
+  result: CriterionResultValue;
+  failureCategory?: FailureCategory;
+  reason: string;
+  confidence: number;
+  cachedAt: string;
+}
+
+export type VerdictCache = Record<string, VerdictCacheEntry>;
 
 /**
  * File-based memory. This is the difference between VerifyFlow and a stateless judge
@@ -437,5 +486,23 @@ export class MemoryStore {
       cleared.push(r.slug);
     }
     return cleared;
+  }
+
+  // --- Verdict cache (IN-801) -----------------------------------------------------------------
+
+  async loadVerdictCache(repo: string): Promise<VerdictCache> {
+    try {
+      const raw = await fs.readFile(path.join(this.dir(repo), "verdicts.json"), "utf8");
+      return JSON.parse(raw) as VerdictCache;
+    } catch {
+      return {};
+    }
+  }
+
+  /** Persist the verdict cache for a repo (whole-map write; the map is small — one entry per probe). */
+  async saveVerdictCache(repo: string, cache: VerdictCache): Promise<void> {
+    const dir = this.dir(repo);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "verdicts.json"), JSON.stringify(cache, null, 2) + "\n");
   }
 }

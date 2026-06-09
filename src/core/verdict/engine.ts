@@ -10,6 +10,7 @@ import type {
 import type { LlmClient } from "../../backends/llm.js";
 import { extractJson } from "../../util/json.js";
 import { looksLikeHarnessError } from "../../util/harnessError.js";
+import { evidenceHash, isReusableProbeResult } from "../../memory/store.js";
 
 export interface VerdictOutput {
   criterionResults: CriterionResult[];
@@ -24,8 +25,20 @@ export interface VerdictOutput {
  */
 export type FeedbackMatch = (criterionText: string) => { note?: string } | undefined;
 
+/**
+ * Evidence-keyed verdict cache (IN-801). `get` returns a prior verdict for an evidence hash;
+ * `put` records a freshly-computed one. The pipeline backs this with the memory store; the engine
+ * stays disk-free. A cache hit means the LLM is not consulted for that criterion → re-runs over
+ * identical evidence are deterministic.
+ */
+export interface VerdictCacheAccess {
+  get(hash: string): { result: CriterionResultValue; failureCategory?: FailureCategory; reason: string; confidence: number } | undefined;
+  put(hash: string, v: { result: CriterionResultValue; failureCategory?: FailureCategory; reason: string; confidence: number }): void;
+}
+
 export interface VerdictOptions {
   feedbackMatch?: FeedbackMatch;
+  verdictCache?: VerdictCacheAccess;
 }
 
 /**
@@ -100,16 +113,55 @@ export async function decideVerdict(
     evaluateCriterion(c, byStep.get(`probe-${c.id}`), scoped, setupFailed),
   );
 
+  // Verdict cache (IN-801): for each criterion with executed probe evidence, reuse a prior verdict
+  // for the same evidence hash. A hit overrides the rule-derived verdict and exempts the criterion
+  // from the (stochastic) LLM review below — so a re-run over identical evidence is deterministic.
+  // `cached` keys are criterion ids; `hashOf` is reused when recording fresh verdicts afterwards.
+  const cached = new Set<string>();
+  const hashOf = new Map<string, string>();
+  if (opts.verdictCache) {
+    for (let i = 0; i < criteria.criteria.length; i++) {
+      const c = criteria.criteria[i]!;
+      const probe = byStep.get(`probe-${c.id}`);
+      const h = probe?.executed
+        ? evidenceHash(c.text, { command: probe.command ?? "", exitCode: probe.exitCode ?? null, stdout: probe.stdout ?? "", stderr: probe.stderr ?? "" })
+        : undefined;
+      if (!h) continue;
+      hashOf.set(c.id, h);
+      const hit = opts.verdictCache.get(h);
+      if (hit) {
+        // Keep the fresh evidence paths; only the LLM-independent verdict fields are reused.
+        criterionResults[i] = { ...criterionResults[i]!, result: hit.result, failureCategory: hit.failureCategory, reason: hit.reason, confidence: hit.confidence };
+        cached.add(c.id);
+      }
+    }
+  }
+
   if (await llm.available()) {
     try {
-      await reviewSubstringMisses(criteria, criterionResults, byStep, llm);
+      await reviewSubstringMisses(criteria, criterionResults, byStep, llm, cached);
     } catch {
       /* keep the parked not_evaluable when the model is unavailable/unparsable */
     }
     try {
-      await applyLlmJudgment(criteria, criterionResults, results, llm);
+      await applyLlmJudgment(criteria, criterionResults, results, llm, cached);
     } catch {
       /* keep rule-based results when the model is unavailable/unparsable */
+    }
+  }
+
+  // Record freshly-computed verdicts (cache misses with executed probe evidence) so the next run
+  // over the same evidence reuses them. Stored BEFORE feedback so the cache holds the rules+LLM
+  // verdict; false-positive feedback stays an orthogonal layer re-applied each run.
+  if (opts.verdictCache) {
+    for (const r of criterionResults) {
+      if (cached.has(r.criterionId)) continue;
+      // Don't cache `blocked` (environment/harness failure or timeout): consistent with
+      // isReusableProbeResult — a transient failure with a stable error string shouldn't be
+      // replayed as the answer; re-attempt it next run (review fix IN-801).
+      if (!isReusableProbeResult(r.result)) continue;
+      const h = hashOf.get(r.criterionId);
+      if (h) opts.verdictCache.put(h, { result: r.result, failureCategory: r.failureCategory, reason: r.reason, confidence: r.confidence });
     }
   }
 
@@ -374,8 +426,10 @@ async function reviewSubstringMisses(
   results: CriterionResult[],
   byStep: Map<string, HarnessResult>,
   llm: LlmClient,
+  skip?: Set<string>,
 ): Promise<void> {
   for (const c of criteria.criteria) {
+    if (skip?.has(c.id)) continue; // served from the verdict cache (IN-801) — don't re-judge
     if (!c.probe?.fromTicket || !c.probe.expectSubstring) continue;
     const probe = byStep.get(`probe-${c.id}`);
     if (!probe || !probe.executed || probe.timedOut || probe.exitCode !== 0) continue;
@@ -430,7 +484,12 @@ async function applyLlmJudgment(
   results: CriterionResult[],
   harness: HarnessResult[],
   llm: LlmClient,
+  skip?: Set<string>,
 ): Promise<void> {
+  // Criteria served from the verdict cache (IN-801) are not re-judged: exclude them from the
+  // prompt and refuse any adjustment to them, so a cache hit is fully LLM-independent.
+  const reviewable = results.filter((r) => !skip?.has(r.criterionId));
+  if (reviewable.length === 0) return;
   const rank: Record<CriterionResultValue, number> = {
     pass: 4,
     partial: 3,
@@ -463,7 +522,7 @@ async function applyLlmJudgment(
   const prompt = [
     "Criteria + current rule-based verdicts:",
     JSON.stringify(
-      results.map((r) => ({ id: r.criterionId, text: r.criterion, result: r.result })),
+      reviewable.map((r) => ({ id: r.criterionId, text: r.criterion, result: r.result })),
       null,
       2,
     ),
@@ -493,6 +552,7 @@ async function applyLlmJudgment(
   const raw = await llm.complete({ system, prompt, task: "verdict-review", tier: "smart" });
   const parsed = extractJson<{ adjustments?: LlmVerdictAdj[] }>(raw);
   for (const adj of parsed.adjustments ?? []) {
+    if (skip?.has(adj.id)) continue; // cached verdict — not adjustable
     const r = results.find((x) => x.criterionId === adj.id);
     if (!r || !adj.downgradeTo) continue;
     if (adj.downgradeTo === "fail" && !canFail(adj.id)) {
