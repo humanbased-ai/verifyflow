@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VerifyFlow · vf watch 富进度 (IN-749)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #e6edf3; line-height: 1.6; }
+    header {
+      background: #161b22; border-bottom: 1px solid #30363d; padding: 22px 40px;
+      display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 10;
+    }
+    header .logo { font-size: 19px; font-weight: 700; color: #58a6ff; letter-spacing: -0.5px; }
+    header .tag { font-size: 13px; color: #8b949e; border-left: 1px solid #30363d; padding-left: 14px; }
+    .container { max-width: 920px; margin: 0 auto; padding: 40px 24px 80px; }
+    h1 { font-size: 30px; color: #f0f6fc; margin-bottom: 10px; }
+    .lede { color: #8b949e; font-size: 15px; margin-bottom: 8px; }
+    .pill {
+      display: inline-block; background: #1f2937; border: 1px solid #30363d; border-radius: 20px;
+      padding: 4px 13px; font-size: 12px; font-family: "SF Mono", monospace; color: #79c0ff; margin-bottom: 34px;
+    }
+    .col-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
+    .col-label.before { color: #8b949e; }
+    .col-label.after  { color: #3fb950; }
+    .block { margin-bottom: 34px; }
+
+    .term { background: #010409; border: 1px solid #30363d; border-radius: 10px; overflow: hidden; }
+    .term-bar { background: #161b22; border-bottom: 1px solid #21262d; padding: 9px 14px; display: flex; align-items: center; gap: 7px; }
+    .dot { width: 11px; height: 11px; border-radius: 50%; }
+    .dot.red { background: #ff5f56; } .dot.yel { background: #ffbd2e; } .dot.grn { background: #27c93f; }
+    .term-title { margin-left: 10px; font-size: 11px; color: #6e7681; font-family: "SF Mono", monospace; }
+    pre {
+      font-family: "SF Mono", "Fira Code", Consolas, monospace; font-size: 12.5px; line-height: 1.7;
+      padding: 16px; overflow-x: auto; color: #adbac7; white-space: pre;
+    }
+    .prompt { color: #3fb950; }
+    /* ANSI → CSS, matching src/util/color.ts */
+    .g { color: #3fb950; }  .r { color: #f85149; }  .y { color: #d29922; }
+    .c { color: #58a6ff; }  .d { color: #6e7681; }  .b { color: #f0f6fc; font-weight: 700; }
+
+    .anno { color: #8b949e; font-size: 13px; margin: 10px 2px 0; padding-left: 14px; border-left: 2px solid #30363d; }
+    .feat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 34px; }
+    @media (max-width: 700px) { .feat-grid { grid-template-columns: 1fr; } }
+    .feat { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 16px 18px; }
+    .feat h3 { font-size: 13px; color: #f0f6fc; margin-bottom: 5px; }
+    .feat p { font-size: 12.5px; color: #8b949e; }
+    .feat code { background: #1f2937; border-radius: 4px; padding: 1px 5px; color: #79c0ff; font-size: 11.5px; }
+    footer { text-align: center; padding: 30px; color: #484f58; font-size: 12px; border-top: 1px solid #21262d; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="logo">⚡ VerifyFlow</div>
+  <div class="tag">vf watch 富进度 · IN-749</div>
+</header>
+
+<div class="container">
+  <h1>持久模式:能看见它在干什么</h1>
+  <p class="lede">守护进程过去几乎静默 —— 验证一个 PR 要几分钟,期间屏幕上什么都没有。</p>
+  <p class="lede" style="margin-bottom:18px">现在像 Crosscheck / Symphony 一样流式输出:心跳、PR 标题、逐步进度、收尾结论。</p>
+  <div class="pill">vf watch --repo humanbased-ai/verifyflow --auto-merge --interval 120</div>
+
+  <!-- before -->
+  <div class="block">
+    <div class="col-label before">● 之前 — 几乎静默</div>
+    <div class="term">
+      <div class="term-bar"><span class="dot red"></span><span class="dot yel"></span><span class="dot grn"></span><span class="term-title">vf watch — before</span></div>
+<pre>[verifyflow] vf watch on humanbased-ai/verifyflow — every 120s, auto-merge: true (Ctrl-C to stop).
+[verifyflow] PR #42@a1b2c3d4: verdict=accept merged=true
+[verifyflow] PR #43@b2c3d4e5: verdict=needs_fix merged=false</pre>
+    </div>
+    <p class="anno">启动一行,然后每个处理过的 PR 一行干巴巴的总结。验证那几分钟里完全没有反馈,也看不到 PR 标题、是哪一步。</p>
+  </div>
+
+  <!-- after -->
+  <div class="block">
+    <div class="col-label after">● 现在 — 流式 + 上色</div>
+    <div class="term">
+      <div class="term-bar"><span class="dot red"></span><span class="dot yel"></span><span class="dot grn"></span><span class="term-title">vf watch — after</span></div>
+<pre><span class="d">[verifyflow]</span> vf watch on <span class="c">humanbased-ai/verifyflow</span> — every 120s, auto-merge: <span class="g">on</span> <span class="d">(Ctrl-C to stop).</span>
+<span class="d">[verifyflow] tick:</span> 7 open · 5 already verified · 2 approved &amp; pending
+<span class="b">▶</span> verifying <span class="c">PR #42</span> <span class="d">"Add vf --version flag"</span>
+  <span class="c">#42</span> <span class="d">fetched IN-737 and PR #42 (3 changed files)</span>
+  <span class="c">#42</span> <span class="d">extracted 4 acceptance criteria</span>
+  <span class="c">#42</span> <span class="d">planned 3 steps — level functional</span>
+  <span class="c">#42</span> <span class="d">running: vf --version prints the package version</span>
+  <span class="c">#42</span> <span class="d">verdict: accept</span>
+<span class="g">✔</span> <span class="c">PR #42</span><span class="d">@a1b2c3d4</span> → <span class="g">accept</span><span class="g"> (merged)</span>
+<span class="b">▶</span> verifying <span class="c">PR #43</span> <span class="d">"Fix flaky checkout retry"</span>
+  <span class="c">#43</span> <span class="d">fetched IN-740 and PR #43 (5 changed files)</span>
+  <span class="c">#43</span> <span class="d">extracted 3 acceptance criteria</span>
+  <span class="c">#43</span> <span class="d">planned 4 steps — level functional</span>
+  <span class="c">#43</span> <span class="d">running: retry succeeds after a transient clone failure</span>
+  <span class="c">#43</span> <span class="d">verdict: needs_fix</span>
+<span class="d">•</span> <span class="c">PR #43</span><span class="d">@b2c3d4e5</span> → <span class="r">needs_fix</span>
+<span class="d">[verifyflow] tick: 7 open · 7 already verified · 0 approved &amp; pending — nothing to do</span></pre>
+    </div>
+    <p class="anno">心跳每轮都打(连"无事可做"也打,证明守护进程还活着);每个 PR 带标题开场、逐步进度按 PR 前缀缩进、收尾一行 ✔/✘/• 给结论。</p>
+  </div>
+
+  <div class="feat-grid">
+    <div class="feat"><h3>每轮心跳</h3><p><code>tick: 7 open · 5 already verified · 2 approved &amp; pending</code> —— 一眼知道这轮有没有活干。</p></div>
+    <div class="feat"><h3>PR 身份</h3><p>开场行带 <code>PR #N "标题"</code>,不再只有 <code>#N@sha</code>。</p></div>
+    <div class="feat"><h3>逐步进度</h3><p>流水线每步(fetched / extracted / planned / running / verdict)按 <code>#N</code> 前缀打出来。</p></div>
+    <div class="feat"><h3>收尾框</h3><p><span class="g">✔</span> 已合并 · <span class="d">•</span> 未合并 · <span class="r">✘</span> 出错,verdict 按严重度上色。</p></div>
+  </div>
+</div>
+
+<footer>VerifyFlow · IN-749 · 纯观测,不改 watchTick 的判定/去重逻辑 · 输出走 stderr</footer>
+</body>
+</html>

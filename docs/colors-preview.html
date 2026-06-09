@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VerifyFlow · 彩色终端输出 (IN-748)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d1117; color: #e6edf3; line-height: 1.6;
+    }
+    header {
+      background: #161b22; border-bottom: 1px solid #30363d;
+      padding: 22px 40px; display: flex; align-items: center; gap: 14px;
+      position: sticky; top: 0; z-index: 10;
+    }
+    header .logo { font-size: 19px; font-weight: 700; color: #58a6ff; letter-spacing: -0.5px; }
+    header .tag { font-size: 13px; color: #8b949e; border-left: 1px solid #30363d; padding-left: 14px; }
+    .container { max-width: 920px; margin: 0 auto; padding: 40px 24px 80px; }
+    h1 { font-size: 30px; color: #f0f6fc; margin-bottom: 10px; }
+    .lede { color: #8b949e; font-size: 15px; margin-bottom: 8px; }
+    .pill {
+      display: inline-block; background: #1f2937; border: 1px solid #30363d;
+      border-radius: 20px; padding: 4px 13px; font-size: 12px;
+      font-family: "SF Mono", monospace; color: #79c0ff; margin-bottom: 36px;
+    }
+    .block { margin-bottom: 40px; }
+    .block-title {
+      font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+      color: #58a6ff; margin-bottom: 6px;
+    }
+    .block-note { color: #8b949e; font-size: 13px; margin-bottom: 14px; }
+
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 760px) { .split { grid-template-columns: 1fr; } }
+    .col-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em;
+      margin-bottom: 8px; display: flex; align-items: center; gap: 6px;
+    }
+    .col-label.before { color: #8b949e; }
+    .col-label.after  { color: #3fb950; }
+
+    /* terminal window */
+    .term {
+      background: #010409; border: 1px solid #30363d; border-radius: 10px; overflow: hidden;
+    }
+    .term-bar {
+      background: #161b22; border-bottom: 1px solid #21262d; padding: 9px 14px;
+      display: flex; align-items: center; gap: 7px;
+    }
+    .dot { width: 11px; height: 11px; border-radius: 50%; }
+    .dot.red { background: #ff5f56; } .dot.yel { background: #ffbd2e; } .dot.grn { background: #27c93f; }
+    .term-title { margin-left: 10px; font-size: 11px; color: #6e7681; font-family: "SF Mono", monospace; }
+    pre {
+      font-family: "SF Mono", "Fira Code", Consolas, monospace;
+      font-size: 12.5px; line-height: 1.65; padding: 16px 16px; overflow-x: auto;
+      color: #adbac7; white-space: pre; tab-size: 2;
+    }
+    .prompt { color: #3fb950; }     /* shell $ */
+    /* ANSI → CSS, matching src/util/color.ts */
+    .g { color: #3fb950; }          /* green 32 */
+    .r { color: #f85149; }          /* red 31 */
+    .y { color: #d29922; }          /* yellow 33 */
+    .c { color: #58a6ff; }          /* cyan 36 */
+    .d { color: #6e7681; }          /* dim 2 */
+    .b { color: #f0f6fc; font-weight: 700; } /* bold 1 */
+    .legend {
+      display: flex; flex-wrap: wrap; gap: 14px; margin-top: 38px;
+      padding: 16px 18px; background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+      font-size: 12.5px;
+    }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; color: #8b949e; }
+    .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+    footer { text-align: center; padding: 30px; color: #484f58; font-size: 12px; border-top: 1px solid #21262d; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="logo">⚡ VerifyFlow</div>
+  <div class="tag">彩色终端输出 · IN-748</div>
+</header>
+
+<div class="container">
+  <h1>彩色终端输出</h1>
+  <p class="lede">同样的命令,现在状态一眼可辨 —— 通过/失败/警告不再是同一种灰色。</p>
+  <p class="lede" style="margin-bottom:18px">左边是合并前(全默认色),右边是现在(<code>vf doctor</code> 等在终端里的真实效果)。</p>
+  <div class="pill">零依赖 ANSI · 非 TTY / NO_COLOR / 管道时自动关闭</div>
+
+  <!-- doctor -->
+  <div class="block">
+    <div class="block-title">vf doctor</div>
+    <div class="block-note">状态词上色:ok 绿、FAIL 红、WARN 黄;说明文字变暗;结尾行整体绿/红。</div>
+    <div class="split">
+      <div>
+        <div class="col-label before">● 之前 — 全灰</div>
+        <div class="term">
+          <div class="term-bar"><span class="dot red"></span><span class="dot yel"></span><span class="dot grn"></span><span class="term-title">vf doctor</span></div>
+<pre><span class="prompt">$</span> vf doctor
+  [ok  ] gh: found
+  [ok  ] LINEAR_API_KEY: set (env)
+  [ok  ] claude: found
+  [ok  ] uv: found
+  [WARN] sandbox (docker/podman): neither docker nor
+         podman found — probes run on the host
+  [ok  ] playwright: installed — `--level ui` available
+
+doctor: all required tools are ready.</pre>
+        </div>
+      </div>
+      <div>
+        <div class="col-label after">● 现在 — 上色</div>
+        <div class="term">
+          <div class="term-bar"><span class="dot red"></span><span class="dot yel"></span><span class="dot grn"></span><span class="term-title">vf doctor</span></div>
+<pre><span class="prompt">$</span> vf doctor
+  [<span class="g">ok  </span>] gh: <span class="d">found</span>
+  [<span class="g">ok  </span>] LINEAR_API_KEY: <span class="d">set (env)</span>
+  [<span class="g">ok  </span>] claude: <span class="d">found</span>
+  [<span class="g">ok  </span>] uv: <span class="d">found</span>
+  [<span class="y">WARN</span>] sandbox (docker/podman): <span class="d">neither docker nor</span>
+         <span class="d">podman found — probes run on the host</span>
+  [<span class="g">ok  </span>] playwright: <span class="d">installed — `--level ui` available</span>
+
+<span class="g">doctor: all required tools are ready.</span></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- criterion table -->
+  <div class="block">
+    <div class="block-title">vf run — 验收标准判定表</div>
+    <div class="block-note">每条标准按结果上色:pass 绿、fail 红、partial 黄;标准 id 青色;置信度变暗;最终 verdict 按严重度上色。</div>
+    <div class="split">
+      <div>
+        <div class="col-label before">● 之前 — 全灰</div>
+        <div class="term">
+          <div class="term-bar"><span class="dot red"></span><span class="dot yel"></span><span class="dot grn"></span><span class="term-title">vf run</span></div>
+<pre>──────────────────────────────────────────────
+  C-001  ✓ pass         0.95  User can log in
+  C-002  ✗ fail         0.42  /health returns 200
+  C-003  ~ partial      0.68  Dashboard renders
+──────────────────────────────────────────────
+  Verdict: needs_fix   (1 pass, 1 fail, 1 partial)
+──────────────────────────────────────────────</pre>
+        </div>
+      </div>
+      <div>
+        <div class="col-label after">● 现在 — 上色</div>
+        <div class="term">
+          <div class="term-bar"><span class="dot red"></span><span class="dot yel"></span><span class="dot grn"></span><span class="term-title">vf run</span></div>
+<pre><span class="d">──────────────────────────────────────────────</span>
+  <span class="c">C-001</span>  <span class="g">✓ pass       </span>  <span class="d">0.95</span>  User can log in
+  <span class="c">C-002</span>  <span class="r">✗ fail       </span>  <span class="d">0.42</span>  /health returns 200
+  <span class="c">C-003</span>  <span class="y">~ partial    </span>  <span class="d">0.68</span>  Dashboard renders
+<span class="d">──────────────────────────────────────────────</span>
+  Verdict: <span class="r">needs_fix</span>   <span class="d">(1 pass, 1 fail, 1 partial)</span>
+<span class="d">──────────────────────────────────────────────</span></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- onboard -->
+  <div class="block">
+    <div class="block-title">vf onboard</div>
+    <div class="block-note">引导式徽章:ok 绿、FIX 红、WARN 黄、info 青;待修复步骤一眼看出。</div>
+    <div class="split">
+      <div>
+        <div class="col-label before">● 之前 — 全灰</div>
+        <div class="term">
+          <div class="term-bar"><span class="dot red"></span><span class="dot yel"></span><span class="dot grn"></span><span class="term-title">vf onboard</span></div>
+<pre><span class="prompt">$</span> vf onboard
+  [ok  ] gh: installed and authenticated
+  [info] repo: detected humanbased-ai/verifyflow
+  [FIX ] LINEAR_API_KEY: not set
+  [ok  ] claude: installed
+  [ok  ] playwright: installed</pre>
+        </div>
+      </div>
+      <div>
+        <div class="col-label after">● 现在 — 上色</div>
+        <div class="term">
+          <div class="term-bar"><span class="dot red"></span><span class="dot yel"></span><span class="dot grn"></span><span class="term-title">vf onboard</span></div>
+<pre><span class="prompt">$</span> vf onboard
+  [<span class="g">ok  </span>] gh: <span class="d">installed and authenticated</span>
+  [<span class="c">info</span>] repo: <span class="d">detected humanbased-ai/verifyflow</span>
+  [<span class="r">FIX </span>] LINEAR_API_KEY: <span class="d">not set</span>
+  [<span class="g">ok  </span>] claude: <span class="d">installed</span>
+  [<span class="g">ok  </span>] playwright: <span class="d">installed</span></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><span class="sw" style="background:#3fb950"></span>绿 — ok / pass / accept / merged</span>
+    <span><span class="sw" style="background:#f85149"></span>红 — FAIL / fail / needs_fix / error</span>
+    <span><span class="sw" style="background:#d29922"></span>黄 — WARN / partial / 需人工复核</span>
+    <span><span class="sw" style="background:#58a6ff"></span>青 — 标识符 (PR #, 标准 id, repo)</span>
+    <span><span class="sw" style="background:#6e7681"></span>暗 — 次要信息 (路径 / sha / 说明)</span>
+  </div>
+</div>
+
+<footer>VerifyFlow · IN-748 · 颜色仅在交互式终端出现,管道 / NO_COLOR / 重定向时自动关闭</footer>
+</body>
+</html>

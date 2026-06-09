@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>流水线全流程演示 · Linear → Symphony → Crosscheck → VerifyFlow</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; background: #0d1117; color: #e6edf3; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+  .mono { font-family: "SF Mono", "Fira Code", Consolas, monospace; }
+
+  header { background: #161b22; border-bottom: 1px solid #30363d; padding: 11px 24px; display: flex; align-items: center; gap: 14px; flex-shrink: 0; z-index: 60; }
+  header .logo { font-size: 18px; font-weight: 700; color: #58a6ff; }
+  header .tag { font-size: 13px; color: #8b949e; border-left: 1px solid #30363d; padding-left: 13px; }
+  .controls { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  button { background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 7px; padding: 7px 16px; font-size: 13px; cursor: pointer; }
+  button:hover { border-color: #58a6ff; }
+  button.primary { background: #238636; border-color: #2ea043; }
+  select { background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 7px; padding: 7px 8px; font-size: 12px; }
+
+  .wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px 20px 14px; }
+  .stage { flex: 1; min-height: 0; display: flex; gap: 14px; }
+  .side { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .side .card { overflow: auto; }
+  @media (max-width: 1150px){ .stage { flex-direction: column; } .side { width: auto; flex-direction: row; } .side .card { flex: 1; } }
+
+  /* toast 抓到提示 */
+  #toast { position: fixed; top: 76px; left: 50%; transform: translateX(-50%) translateY(-16px); background: #1f6feb; color: #fff; font-size: 15px; font-weight: 600; padding: 10px 22px; border-radius: 30px; box-shadow: 0 8px 30px rgba(31,111,235,.5); opacity: 0; transition: opacity .3s, transform .3s; z-index: 80; pointer-events: none; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* phase timeline */
+  .phases { display: flex; align-items: center; background: #0b0f14; border: 1px solid #21262d; border-radius: 12px; padding: 10px 18px; overflow-x: auto; flex-shrink: 0; }
+  .ph { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 160px; opacity: .4; transition: opacity .3s; }
+  .ph.on { opacity: 1; }
+  .ph .dot { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 17px; background: #161b22; border: 1px solid #30363d; flex-shrink: 0; transition: all .3s; }
+  .ph.on .dot { border-color: #58a6ff; box-shadow: 0 0 0 4px rgba(88,166,255,.16); transform: scale(1.12); }
+  .ph.done .dot { background: #0d2818; border-color: #3fb950; }
+  .ph .lab b { display: block; color: #f0f6fc; font-size: 14px; } .ph .lab span { color: #8b949e; font-size: 11.5px; }
+  .ph-arrow { color: #30363d; font-size: 18px; padding: 0 10px; }
+
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 14px 16px; transition: transform .35s, box-shadow .35s; }
+  .card .ctitle { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: #8b949e; margin-bottom: 10px; }
+  .issue-key { color: #bc8cff; font-weight: 700; }
+  .issue-title { color: #f0f6fc; font-size: 15px; font-weight: 600; }
+  .ac { list-style: none; margin: 9px 0 0; }
+  .ac li { font-size: 12.5px; color: #adbac7; padding: 2px 0 2px 16px; position: relative; }
+  .ac li::before { content: "☐"; position: absolute; left: 0; color: #6e7681; }
+  .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .pill { font-size: 11.5px; font-weight: 700; padding: 3px 11px; border-radius: 20px; }
+  .pill.gray{background:#21262d;color:#8b949e}.pill.purple{background:#2a1d4d;color:#bc8cff}
+  .pill.blue{background:#0c2d52;color:#58a6ff}.pill.green{background:#0d2818;color:#3fb950}
+  .pill.yellow{background:#3a2d09;color:#e3b341}
+  .muted { color:#6e7681; font-size:12px; }
+  .placeholder { color:#484f58; font-size:13.5px; font-style: italic; padding: 6px 0; }
+
+  .terms { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 1150px){ .terms { grid-template-columns: 1fr; } }
+  .term { background:#010409; border:1px solid #30363d; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; min-height:0; transition: transform .35s, box-shadow .35s, border-color .25s; }
+  .tbar { background:#161b22; border-bottom:1px solid #21262d; padding:9px 13px; display:flex; align-items:center; gap:7px; }
+  .tbar .dots i { width:11px;height:11px;border-radius:50%;display:inline-block;margin-right:5px; }
+  .d1{background:#ff5f56}.d2{background:#ffbd2e}.d3{background:#27c93f}
+  .tbar .tt { margin-left:6px; font-size:12.5px; color:#adbac7; }
+  .tbar .live { margin-left:auto; font-size:10.5px; color:#6e7681; text-transform:uppercase; letter-spacing:.06em; display:flex; align-items:center; gap:6px; }
+  .tbar .live::before { content:""; width:8px;height:8px;border-radius:50%; background:#30363d; }
+  .term.active .tbar .live::before { background:#3fb950; box-shadow:0 0 7px #3fb950; }
+  .term.active .tbar .live { color:#3fb950; }
+  pre { flex: 1; min-height: 0; padding: 12px 14px; font-family:"SF Mono","Fira Code",Consolas,monospace; font-size:12.5px; line-height:1.6; color:#adbac7; overflow-y:auto; white-space:pre-wrap; word-break:break-word; }
+  pre .ln { display:block; }
+
+  /* 放大高亮:抓到工单/PR 时聚焦 */
+  .spot { transform: scale(1.045); box-shadow: 0 0 0 3px #58a6ff, 0 16px 54px rgba(0,0,0,.6); z-index: 40; position: relative; }
+  .term.active { border-color:#58a6ff; }
+
+  .g{color:#3fb950}.r{color:#f85149}.y{color:#d29922}.c{color:#58a6ff}.p{color:#bc8cff}.d{color:#6e7681}.b{color:#f0f6fc;font-weight:700}
+  .prompt{color:#3fb950}.cmd{color:#e6edf3}
+  .cursor { display:inline-block; width:8px; height:14px; background:#3fb950; animation: blink 1s steps(1) infinite; vertical-align:-2px; margin-left:1px; }
+  @keyframes blink { 50%{opacity:0} }
+  .done-banner { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); padding:11px 24px; border-radius:30px; background:#0d2818; border:1px solid #2ea043; color:#3fb950; font-size:14px; font-weight:600; display:none; z-index:70; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  .done-banner.show { display:block; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">⚡ 全流程演示</div>
+  <div class="tag">工单 → Symphony 派活 → Crosscheck 审/修 → VerifyFlow 验收 · 多窗口持续监控</div>
+  <div class="controls">
+    <select id="speed">
+      <option value="1.6">0.6×</option>
+      <option value="1" selected>1×</option>
+      <option value="0.5">2×</option>
+      <option value="0.25">4×</option>
+    </select>
+    <button id="replay" class="primary">▶ 重新播放</button>
+  </div>
+</header>
+
+<div id="toast"></div>
+
+<div class="wrap">
+  <div class="phases" id="phases">
+    <div class="ph" data-ph="0"><div class="dot">📋</div><div class="lab"><b>Linear 工单</b><span>需求进来</span></div></div>
+    <div class="ph-arrow">→</div>
+    <div class="ph" data-ph="1"><div class="dot">🎼</div><div class="lab"><b>Symphony</b><span>派 agent 写 → 开 PR</span></div></div>
+    <div class="ph-arrow">→</div>
+    <div class="ph" data-ph="2"><div class="dot">🔎</div><div class="lab"><b>Crosscheck</b><span>审 → 派 agent 修 → 批准</span></div></div>
+    <div class="ph-arrow">→</div>
+    <div class="ph" data-ph="3"><div class="dot">✅</div><div class="lab"><b>VerifyFlow</b><span>验交付 → 自动合并</span></div></div>
+  </div>
+
+  <div class="stage">
+    <div class="side">
+      <div class="card" id="linear-card">
+        <div class="ctitle">📋 Linear · project VerifyFlow</div>
+        <div id="linear-body"><div class="placeholder">等待新工单…</div></div>
+      </div>
+      <div class="card" id="pr-card">
+        <div class="ctitle">🐙 GitHub · humanbased-ai/app</div>
+        <div id="pr-body"><div class="placeholder">还没有 PR…</div></div>
+      </div>
+    </div>
+    <div class="terms">
+      <div class="term" id="t-sym"><div class="tbar"><span class="dots"><i class="d1"></i><i class="d2"></i><i class="d3"></i></span><span class="tt mono">symphony</span><span class="live">watching</span></div><pre id="sym"></pre></div>
+      <div class="term" id="t-cc"><div class="tbar"><span class="dots"><i class="d1"></i><i class="d2"></i><i class="d3"></i></span><span class="tt mono">crosscheck</span><span class="live">watching</span></div><pre id="cc"></pre></div>
+      <div class="term" id="t-vf"><div class="tbar"><span class="dots"><i class="d1"></i><i class="d2"></i><i class="d3"></i></span><span class="tt mono">verifyflow</span><span class="live">watching</span></div><pre id="vf"></pre></div>
+    </div>
+  </div>
+
+  <div class="done-banner" id="done">🎉 闭环完成 · IN-900 从"需求"到"已验证合并",全程无人介入</div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let speed = 1, token = 0;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms * speed));
+
+function line(paneId, html) {
+  const pre = $(paneId); const s = document.createElement("span"); s.className = "ln"; s.innerHTML = html;
+  pre.appendChild(s); pre.scrollTop = pre.scrollHeight;
+}
+async function typeCmd(paneId, cmd, my) {
+  const pre = $(paneId); const ln = document.createElement("span"); ln.className = "ln";
+  ln.innerHTML = `<span class="prompt">$</span> <span class="cmd"></span><span class="cursor"></span>`;
+  pre.appendChild(ln); pre.scrollTop = pre.scrollHeight;
+  const tgt = ln.querySelector(".cmd");
+  for (const ch of cmd) { if (my !== token) return; tgt.textContent += ch; await sleep(26); }
+  const cur = ln.querySelector(".cursor"); if (cur) cur.remove();
+}
+function activate(termId) { ["t-sym","t-cc","t-vf"].forEach(t => $(t).classList.toggle("active", t === termId)); }
+function phase(n) { document.querySelectorAll(".ph").forEach(p => { const i = +p.dataset.ph; p.classList.toggle("on", i === n); p.classList.toggle("done", i < n); }); }
+function spotlight(elId) { const el = $(elId); el.classList.add("spot"); setTimeout(() => el.classList.remove("spot"), 1200 * speed); }
+function toast(txt) { const t = $("toast"); t.textContent = txt; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1700 * speed); }
+const linear = (h) => $("linear-body").innerHTML = h;
+const pr = (h) => $("pr-body").innerHTML = h;
+
+const acList = `<ul class="ac"><li>点导出按钮能下载 CSV</li><li>CSV 含日期列</li><li>导出失败时给出错误提示</li></ul>`;
+const issue = (pill, withAc) => `<div><span class="issue-key">IN-900</span> &nbsp;<span class="issue-title">feat: add export-to-CSV button</span></div>${withAc?acList:""}<div class="row">${pill}<span class="muted mono">label: frontend · assignee: @hao</span></div>`;
+const prCard = (state, review, verify) => `<div><span class="mono c">#70</span> &nbsp;<span class="issue-title">feat: add export-to-CSV button</span></div><div class="row">${state}${review||""}${verify||""}</div><div class="muted mono" style="margin-top:7px">branch wf_a3f2 · linked: IN-900</div>`;
+
+async function run() {
+  const my = ++token; speed = parseFloat($("speed").value);
+  ["sym","cc","vf"].forEach(p => $(p).innerHTML = "");
+  $("done").classList.remove("show");
+  linear(`<div class="placeholder">等待新工单…</div>`); pr(`<div class="placeholder">还没有 PR…</div>`);
+  activate(null); document.querySelectorAll(".ph").forEach(p=>p.classList.remove("on","done"));
+  const g = () => { if (my !== token) throw "x"; };
+
+  try {
+    // —— 启动三个守护进程(打字执行命令) ——
+    await typeCmd("sym", "symphony run WORKFLOW.md", my); g();
+    line("sym", `<span class="d">[symphony] watching Linear project "VerifyFlow" — every 60s…</span>`);
+    await sleep(350);
+    await typeCmd("cc", "crosscheck watch --repo humanbased-ai/app", my); g();
+    line("cc", `<span class="d">[crosscheck] watching humanbased-ai/app — idle, 0 open PRs</span>`);
+    await sleep(350);
+    await typeCmd("vf", "vf watch --repo humanbased-ai/app --auto-merge --interval 120", my); g();
+    line("vf", `<span class="d">[verifyflow] vf watch on humanbased-ai/app — every 120s, auto-merge: <span class="g">on</span></span>`);
+    line("vf", `<span class="d">[verifyflow] tick: 0 open · nothing to do</span>`);
+    await sleep(700); g();
+
+    // —— 阶段0:创建 Linear 工单(逐字段完整) ——
+    phase(0); toast("🧑‍💻 产品创建工单 IN-900");
+    linear(`<div><span class="issue-key">IN-900</span> &nbsp;<span class="issue-title">feat: add export-to-CSV button</span></div><div class="row"><span class="pill gray">Draft</span></div>`);
+    spotlight("linear-card");
+    await sleep(900); g();
+    linear(issue(`<span class="pill gray">Backlog</span>`, true));  // 加上 3 条验收标准
+    await sleep(900); g();
+    linear(issue(`<span class="pill purple">Todo</span>`, true));   // 就绪待领
+    await sleep(800); g();
+
+    // —— 阶段1:Symphony 抓到 → 派 agent → 开 PR ——
+    phase(1); activate("t-sym");
+    line("sym", `<span class="d">[symphony] tick:</span> 1 issue in <span class="p">Todo</span>`);
+    await sleep(600); g();
+    toast("🎯 Symphony 抓到工单 IN-900"); spotlight("t-sym"); spotlight("linear-card");
+    line("sym", `[symphony] <span class="p">IN-900</span> → <span class="b">dispatching coding agent</span>`);
+    linear(issue(`<span class="pill blue">In Progress</span>`, true));
+    await sleep(900); g();
+    line("sym", `<span class="d">  worktree wf_a3f2 · agent: claude · reading 3 ACs…</span>`);
+    await sleep(900); g();
+    line("sym", `<span class="d">  agent: implementing export button + CSV serializer…</span>`);
+    await sleep(1000); g();
+    line("sym", `<span class="d">  agent: 4 files changed · tests added</span>`);
+    await sleep(700); g();
+    line("sym", `[symphony] <span class="g">✓ opened PR #70</span> → humanbased-ai/app#70`);
+    pr(prCard(`<span class="pill green">● Open</span>`));
+    await sleep(900); g();
+
+    // —— 阶段2:Crosscheck 抓到 PR → 审 → 派 agent 修 → 批准 ——
+    phase(2); activate("t-cc");
+    toast("🎯 Crosscheck 抓到 PR #70"); spotlight("t-cc"); spotlight("pr-card");
+    line("cc", `[crosscheck] <span class="b">PR #70 detected</span> (head <span class="d">a1b2c3d</span>) → reviewing`);
+    await sleep(800); g();
+    line("cc", `<span class="d">  reviewer: claude · cloning + analyzing diff…</span>`);
+    await sleep(1100); g();
+    line("cc", `  verdict: <span class="y">⚠ NEEDS WORK</span> <span class="d">(missing date column · no error handling)</span>`);
+    pr(prCard(`<span class="pill green">● Open</span>`, `<span class="pill yellow">⚠ NEEDS WORK</span>`));
+    await sleep(900); g();
+    line("cc", `[crosscheck] <span class="b">dispatching fix agent</span>…`);
+    await sleep(900); g();
+    line("cc", `<span class="d">  fix: + date column · + try/catch on export</span>`);
+    await sleep(800); g();
+    line("cc", `<span class="d">  pushed a4b5c6d</span>`);
+    await sleep(600); g();
+    line("cc", `[crosscheck] recheck → <span class="g">✅ APPROVE</span>`);
+    pr(prCard(`<span class="pill green">● Open</span>`, `<span class="pill green">✅ APPROVE</span>`));
+    await sleep(900); g();
+
+    // —— 阶段3:VerifyFlow 抓到已批准 PR → 验收 → 自动合并 ——
+    phase(3); activate("t-vf");
+    toast("🎯 VerifyFlow 抓到已批准的 PR #70"); spotlight("t-vf"); spotlight("pr-card");
+    line("vf", `<span class="d">[verifyflow] tick:</span> 1 open · 0 already verified · <span class="b">1 approved &amp; pending</span>`);
+    await sleep(800); g();
+    line("vf", `<span class="b">▶</span> verifying <span class="c">PR #70</span> <span class="d">"feat: add export-to-CSV button"</span>`);
+    pr(prCard(`<span class="pill green">● Open</span>`, `<span class="pill green">✅ APPROVE</span>`, `<span class="pill blue">⟳ verifying…</span>`));
+    await sleep(700); g();
+    line("vf", `  <span class="c">#70</span> <span class="d">fetched IN-900 and PR #70 (4 changed files)</span>`);
+    await sleep(700); g();
+    line("vf", `  <span class="c">#70</span> <span class="d">extracted 3 acceptance criteria</span>`);
+    await sleep(700); g();
+    line("vf", `  <span class="c">#70</span> <span class="d">planned 3 steps — level ui (Playwright)</span>`);
+    await sleep(800); g();
+    line("vf", `  <span class="c">#70</span> <span class="d">running: 点导出按钮能下载 CSV…</span>`);
+    await sleep(1000); g();
+    line("vf", `  <span class="c">#70</span> <span class="d">running: CSV 含日期列…</span>`);
+    await sleep(900); g();
+    line("vf", `  <span class="c">#70</span> <span class="d">verdict:</span> <span class="g">accept</span> <span class="d">(3 pass)</span>`);
+    await sleep(700); g();
+    line("vf", `<span class="g">✔</span> <span class="c">PR #70</span><span class="d">@a4b5c6d</span> → <span class="g">accept (merged)</span>`);
+    pr(prCard(`<span class="pill purple">⬤ Merged</span>`, `<span class="pill green">✅ APPROVE</span>`, `<span class="pill green">✔ verified</span>`));
+    linear(issue(`<span class="pill green">✓ Done</span>`, true));
+    toast("🎉 已验证 + 自动合并");
+    await sleep(400); g();
+    document.querySelectorAll(".ph").forEach(p=>p.classList.add("done")); activate(null);
+    $("done").classList.add("show");
+  } catch (e) { /* replay cancelled */ }
+}
+$("replay").addEventListener("click", run);
+$("speed").addEventListener("change", e => { speed = parseFloat(e.target.value); });
+run();
+</script>
+</body>
+</html>
