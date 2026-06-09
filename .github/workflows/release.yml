@@ -169,7 +169,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.compute.outputs.new_version }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if npm view "@humanbased-ai/verifyflow@${RELEASE_VERSION}" version 2>/dev/null | grep -qF "${RELEASE_VERSION}"; then
+          if npm view "@humanbased/verifyflow@${RELEASE_VERSION}" version 2>/dev/null | grep -qF "${RELEASE_VERSION}"; then
             echo "Version ${RELEASE_VERSION} already on npm - skipping publish."
             exit 0
           fi

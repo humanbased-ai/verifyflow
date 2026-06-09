@@ -1,5 +1,5 @@
 {
-  "name": "@humanbased-ai/verifyflow",
+  "name": "@humanbased/verifyflow",
   "version": "0.1.0",
   "description": "Evidence-backed delivery verification agent: does a PR deliver its linked Linear issue?",
   "type": "module",
