@@ -300,6 +300,18 @@ async function executeRun(
     console.error(`error: unknown --policy "${policy}" (expected advisory | merge_gate | strict).`);
     return 2;
   }
+  // A live functional run with neither a workdir nor --checkout has nothing it can execute —
+  // every criterion would come back blocked. Fail fast instead of emitting a useless all-blocked
+  // report with exit 0. (Zero-flag runs inside a repo checkout already default to workdir "." via
+  // context inference; ui/journey/auto can still drive a live --base-url app without a checkout.)
+  if (!str(args.workdir) && !args.checkout && !args.fixtures && level === "functional") {
+    console.error(
+      "error: a functional run has nothing to execute without a checkout — pass --checkout " +
+        "(clone the PR head), --workdir <dir>, or run from inside the target repo. " +
+        "Use --dry-run to preview the plan without executing.",
+    );
+    return 2;
+  }
   // Build context clients.
   const clients = await buildContextClients(args);
   if (typeof clients === "number") return clients;
@@ -891,7 +903,10 @@ async function cmdFeedback(args: Args, positionals: string[]): Promise<number> {
     }
     runId = await latestRunForPr(outputRoot, prNum);
     if (!runId) {
-      console.error(`feedback: no run found for PR #${prNum} under ${path.join(outputRoot, "runs")}.`);
+      console.error(
+        `feedback: no run found for PR #${prNum} under ${path.join(outputRoot, "runs")}.` +
+          " Runs stored under a different root? Point at it with --out <dir>.",
+      );
       return 1;
     }
   }
@@ -909,7 +924,10 @@ async function cmdFeedback(args: Args, positionals: string[]): Promise<number> {
     }
     const runs = await listRecentRuns(outputRoot);
     if (runs.length === 0) {
-      console.error(`feedback: no runs found under ${path.join(outputRoot, "runs")} — run \`vf run\` first.`);
+      console.error(
+        `feedback: no runs found under ${path.join(outputRoot, "runs")} — run \`vf run\` first,` +
+          " or point at the root your runs live under with --out <dir>.",
+      );
       return 1;
     }
     console.error("Recent runs:");

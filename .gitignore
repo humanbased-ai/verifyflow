@@ -14,3 +14,4 @@ artifacts/
 # Editor
 .idea/
 .DS_Store
+.claude/
