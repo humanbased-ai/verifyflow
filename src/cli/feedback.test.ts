@@ -5,7 +5,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MemoryStore } from "../memory/store.js";
-import { recordFalsePositiveFromRun, feedbackLs, feedbackClear, listRecentRuns, latestRunForPr } from "./feedback.js";
+import type { LlmClient, LlmRequest } from "../backends/llm.js";
+import { recordFalsePositiveFromRun, setProbeFromRun, suggestProbeFromRun, feedbackLs, feedbackClear, listRecentRuns, latestRunForPr } from "./feedback.js";
 
 async function tmpRoot() {
   return fs.mkdtemp(path.join(os.tmpdir(), "vf-fbcli-"));
@@ -107,6 +108,97 @@ test("latestRunForPr: resolves the most recent run for a PR among several in fli
   assert.equal(await latestRunForPr(root, 66), "pr66-b", "newest run for PR 66");
   assert.equal(await latestRunForPr(root, 60), "pr60-a");
   assert.equal(await latestRunForPr(root, 999), undefined, "unknown PR → undefined");
+});
+
+// --- IN-808: corrected probe → reusable test point --------------------------
+
+test("setProbeFromRun stores a test point that matchTestPoint resolves, carrying expect flags", async () => {
+  const root = await tmpRoot();
+  await writeReport(root, "run1", "humanbased-ai/verifyflow"); // has AC-5
+  const store = new MemoryStore(root);
+
+  const probe = { command: 'vf demo --out /tmp/x && vf issue ls --out /tmp/x', expectSubstring: "issue", expectExitCode: 0, fromTicket: true };
+  const res = await setProbeFromRun(store, root, "run1", "AC-5", probe, "2026-06-09T00:00:00Z");
+  assert.equal(res.ok, true);
+  assert.equal(res.repo, "humanbased-ai/verifyflow");
+
+  // The next run's planner would resolve this via matchTestPoint on the criterion text.
+  const tp = await store.matchTestPoint("humanbased-ai/verifyflow", "Setup section states that vf onboard saves the key");
+  assert.ok(tp, "a test point is stored for the criterion");
+  assert.equal(tp!.probe.command, probe.command);
+  assert.equal(tp!.probe.expectSubstring, "issue");
+  assert.equal(tp!.probe.expectExitCode, 0);
+  assert.equal(tp!.probe.fromTicket, true, "stored as authoritative");
+});
+
+test("setProbeFromRun: unknown criterion / unsafe runId are clean errors", async () => {
+  const root = await tmpRoot();
+  await writeReport(root, "run1", "o/r");
+  const store = new MemoryStore(root);
+  const probe = { command: "true", fromTicket: true };
+  assert.equal((await setProbeFromRun(store, root, "run1", "AC-99", probe, "t")).ok, false);
+  assert.equal((await setProbeFromRun(store, root, "../escape", "AC-5", probe, "t")).ok, false);
+});
+
+// --- IN-808: --describe → AI-synthesized probe suggestion --------------------
+
+/** Stub LLM that records the request and replies with a fixed body. */
+function stubLlm(reply: string, seen?: { req?: LlmRequest }): LlmClient {
+  return {
+    name: "stub",
+    async available() { return true; },
+    async complete(req) {
+      if (seen) seen.req = req;
+      return reply;
+    },
+  };
+}
+
+test("suggestProbeFromRun: synthesizes a probe from the description + run context", async () => {
+  const root = await tmpRoot();
+  await writeReport(root, "run1", "humanbased-ai/verifyflow"); // has AC-5
+  const seen: { req?: LlmRequest } = {};
+  const llm = stubLlm(
+    JSON.stringify({ command: "grep -q credentials.json README.md", expectExitCode: 0, rationale: "the AC quotes the file name" }),
+    seen,
+  );
+
+  const sug = await suggestProbeFromRun(llm, root, "run1", "AC-5", "应该检查 README 的 Setup 一节提到 credentials.json");
+  assert.equal(sug.ok, true);
+  assert.equal(sug.repo, "humanbased-ai/verifyflow");
+  assert.equal(sug.probe!.command, "grep -q credentials.json README.md");
+  assert.equal(sug.probe!.expectExitCode, 0);
+  assert.equal(sug.probe!.fromTicket, undefined, "not authoritative until the human confirms");
+  assert.match(sug.rationale!, /quotes the file name/);
+  // The model saw both the criterion text and the operator's description.
+  assert.match(seen.req!.prompt, /vf onboard saves the key/);
+  assert.match(seen.req!.prompt, /应该检查 README/);
+});
+
+test("suggestProbeFromRun: expectSubstring is carried; blank/wrong-typed expects are dropped", async () => {
+  const root = await tmpRoot();
+  await writeReport(root, "run1", "o/r");
+  const llm = stubLlm(JSON.stringify({ command: "vf --help", expectSubstring: "feedback", expectExitCode: "zero" }));
+  const sug = await suggestProbeFromRun(llm, root, "run1", "AC-5", "help mentions feedback");
+  assert.equal(sug.ok, true);
+  assert.equal(sug.probe!.expectSubstring, "feedback");
+  assert.equal(sug.probe!.expectExitCode, undefined, "non-integer exit code from the model is dropped");
+});
+
+test("suggestProbeFromRun: no usable command (fallback LLM answers '{}') is a clean error", async () => {
+  const root = await tmpRoot();
+  await writeReport(root, "run1", "o/r");
+  const sug = await suggestProbeFromRun(stubLlm("{}"), root, "run1", "AC-5", "whatever");
+  assert.equal(sug.ok, false);
+  assert.match(sug.text, /--probe/, "points at the manual escape hatch");
+});
+
+test("suggestProbeFromRun: non-JSON model output / unknown criterion / unsafe runId are clean errors", async () => {
+  const root = await tmpRoot();
+  await writeReport(root, "run1", "o/r");
+  assert.equal((await suggestProbeFromRun(stubLlm("sorry, no idea"), root, "run1", "AC-5", "d")).ok, false);
+  assert.equal((await suggestProbeFromRun(stubLlm("{}"), root, "run1", "AC-99", "d")).ok, false);
+  assert.equal((await suggestProbeFromRun(stubLlm("{}"), root, "../escape", "AC-5", "d")).ok, false);
 });
 
 test("feedbackLs and feedbackClear round-trip via the CLI helpers", async () => {

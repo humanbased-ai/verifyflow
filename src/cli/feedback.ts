@@ -1,7 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { MemoryStore, FeedbackRecord } from "../memory/store.js";
-import type { RunReport } from "../types.js";
+import type { LlmClient } from "../backends/llm.js";
+import type { Probe, RunReport } from "../types.js";
+import { extractJson } from "../util/json.js";
 import { runDirFor, isUnsafeRunId } from "./inspect.js";
 
 /**
@@ -111,6 +113,137 @@ export async function recordFalsePositiveFromRun(
     text:
       `feedback: recorded ${criterionId} ("${cr.criterion.slice(0, 60)}${cr.criterion.length > 60 ? "…" : ""}") ` +
       `as a false positive for ${repo}. Future runs will downgrade a matching criterion to blocked.`,
+  };
+}
+
+/**
+ * Set a corrected probe for a criterion (IN-808). Resolves the criterion text + repo from the run's
+ * report.json and stores it as a reusable, authoritative test point, so the next `vf run` runs this
+ * probe for the matching criterion and produces a real pass/fail with evidence (not just `blocked`).
+ */
+export async function setProbeFromRun(
+  store: MemoryStore,
+  outputRoot: string,
+  runId: string,
+  criterionId: string,
+  probe: Probe,
+  now: string,
+): Promise<RecordResult> {
+  if (isUnsafeRunId(runId)) {
+    return { ok: false, text: `feedback: "${runId}" is not a valid run id (must be a single run directory name).` };
+  }
+  const file = path.join(runDirFor(outputRoot, runId), "report.json");
+  let report: RunReport;
+  try {
+    report = JSON.parse(await fs.readFile(file, "utf8")) as RunReport;
+  } catch {
+    return { ok: false, text: `feedback: no report.json for run "${runId}" under ${path.join(outputRoot, "runs")}.` };
+  }
+  const cr = report.criterionResults?.find((c) => c.criterionId === criterionId);
+  if (!cr) {
+    const ids = (report.criterionResults ?? []).map((c) => c.criterionId).join(", ");
+    return { ok: false, text: `feedback: run "${runId}" has no criterion "${criterionId}" (have: ${ids}).` };
+  }
+  const repo = report.request.repo;
+  await store.upsertTestPoint({ repo, component: "", criterionText: cr.criterion, method: "backend", probe, now });
+  const exp = [
+    probe.expectExitCode !== undefined ? `exit ${probe.expectExitCode}` : "",
+    probe.expectSubstring ? `output contains "${probe.expectSubstring}"` : "",
+  ].filter(Boolean).join(", ");
+  return {
+    ok: true,
+    repo,
+    text:
+      `feedback: set probe for ${criterionId} on ${repo} → \`${probe.command}\`${exp ? ` (expect ${exp})` : ""}.\n` +
+      `Future runs will run this probe for that criterion — it can now pass with evidence, not just blocked.`,
+  };
+}
+
+export interface ProbeSuggestion {
+  ok: boolean;
+  text: string;
+  repo?: string;
+  criterionText?: string;
+  /** The synthesized probe. `fromTicket` is intentionally NOT set — the caller sets it after the human confirms. */
+  probe?: Probe;
+  rationale?: string;
+}
+
+/**
+ * Synthesize a corrected probe from an operator's natural-language description (IN-808). The
+ * operator knows the criterion was misjudged and roughly what *should* happen, but not the exact
+ * command — the model combines the description with the run's stored context (criterion text, the
+ * bad probe that ran and its outcome) into a concrete `command` + expectations. The suggestion is
+ * NOT persisted here: a wrong authoritative probe is worse than none (its failure is a real product
+ * `fail`), so the caller must show it to the human and only persist on confirmation.
+ */
+export async function suggestProbeFromRun(
+  llm: LlmClient,
+  outputRoot: string,
+  runId: string,
+  criterionId: string,
+  describe: string,
+): Promise<ProbeSuggestion> {
+  if (isUnsafeRunId(runId)) {
+    return { ok: false, text: `feedback: "${runId}" is not a valid run id (must be a single run directory name).` };
+  }
+  const file = path.join(runDirFor(outputRoot, runId), "report.json");
+  let report: RunReport;
+  try {
+    report = JSON.parse(await fs.readFile(file, "utf8")) as RunReport;
+  } catch {
+    return { ok: false, text: `feedback: no report.json for run "${runId}" under ${path.join(outputRoot, "runs")}.` };
+  }
+  const cr = report.criterionResults?.find((c) => c.criterionId === criterionId);
+  if (!cr) {
+    const ids = (report.criterionResults ?? []).map((c) => c.criterionId).join(", ");
+    return { ok: false, text: `feedback: run "${runId}" has no criterion "${criterionId}" (have: ${ids}).` };
+  }
+  const repo = report.request.repo;
+
+  // What the run actually tried for this criterion — the (likely bad) probe and how it ended.
+  const planned = (report.plan?.steps ?? []).filter((s) => s.criterionIds?.includes(criterionId) && s.command);
+  const context = [
+    `Repo: ${repo}`,
+    `Criterion ${criterionId}: ${cr.criterion}`,
+    `Last verdict: ${cr.result} — ${cr.reason}`,
+    ...(planned.length
+      ? ["Probe(s) the failed run executed (these were judged wrong or insufficient):", ...planned.map((s) => `  $ ${s.command}${s.expectSubstring ? `   # expected output to contain "${s.expectSubstring}"` : ""}`)]
+      : []),
+    "",
+    "Operator's description of what a CORRECT check should verify (may be in any language):",
+    describe,
+  ].join("\n");
+
+  const system =
+    "You are VerifyFlow's probe engineer. A human says a criterion was misjudged and describes what a correct " +
+    "check should verify; you turn that into one concrete, non-interactive shell command runnable from the repo " +
+    "root (chain with && if it truly needs more than one step). Prefer commands quoted in the criterion or the " +
+    "description over invented ones. Respond with JSON only: " +
+    '{"command": "...", "expectSubstring": "...", "expectExitCode": 0, "rationale": "one sentence"}. ' +
+    "Omit expectSubstring/expectExitCode when unsure rather than guessing.";
+
+  let parsed: Partial<{ command: string; expectSubstring: string; expectExitCode: number; rationale: string }>;
+  try {
+    const raw = await llm.complete({ system, prompt: context.slice(0, 6000), task: "feedback-probe-suggest", tier: "smart" });
+    parsed = extractJson(raw);
+  } catch {
+    return { ok: false, text: "feedback: the model did not return a usable probe suggestion — try again, or supply the exact command with --probe." };
+  }
+  const command = typeof parsed.command === "string" ? parsed.command.trim() : "";
+  if (!command) {
+    return { ok: false, text: "feedback: the model could not synthesize a probe (no real model available, or no command in its answer) — supply the exact command with --probe." };
+  }
+  const probe: Probe = { command };
+  if (typeof parsed.expectSubstring === "string" && parsed.expectSubstring.trim()) probe.expectSubstring = parsed.expectSubstring.trim();
+  if (typeof parsed.expectExitCode === "number" && Number.isInteger(parsed.expectExitCode)) probe.expectExitCode = parsed.expectExitCode;
+  return {
+    ok: true,
+    repo,
+    criterionText: cr.criterion,
+    probe,
+    rationale: typeof parsed.rationale === "string" ? parsed.rationale.trim() : "",
+    text: "",
   };
 }
 
