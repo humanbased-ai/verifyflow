@@ -39,7 +39,7 @@ import { runInit } from "./init.js";
 import { runDoctor, renderDoctorReport } from "./doctor.js";
 import { runOnboard, renderOnboardReport } from "./onboard.js";
 import { memoryLs, memoryShow, memoryClear, isValidRepoArg } from "./memory.js";
-import { recordFalsePositiveFromRun, setProbeFromRun, feedbackLs, feedbackClear, listRecentRuns, latestRunForPr } from "./feedback.js";
+import { recordFalsePositiveFromRun, setProbeFromRun, suggestProbeFromRun, feedbackLs, feedbackClear, listRecentRuns, latestRunForPr } from "./feedback.js";
 import { captureIssue, issueContextFromRun, issueLs, renderIssue } from "./issue.js";
 import { showRun, showSignal, isUnsafeRunId } from "./inspect.js";
 import {
@@ -127,6 +127,11 @@ Usage:
                                       Instead of suppressing, give the criterion a CORRECT probe so
                                       the next run actually verifies it (can pass with evidence,
                                       not just blocked) (IN-808).
+  vf feedback --pr <N> --criterion <id> --describe '<what should happen>' [--yes]
+                                      Don't know the exact command? Describe the correct behaviour
+                                      (any language) — the AI synthesizes a probe from the run's
+                                      context and stores it after you confirm (--yes skips the
+                                      prompt; never stored unconfirmed) (IN-808).
   vf feedback ls                      List recorded false-positive feedback per repo.
   vf feedback clear [--repo <o/r>] [--yes]
                                       Prune recorded false-positive feedback (one repo, or all).
@@ -842,7 +847,9 @@ async function confirm(question: string): Promise<boolean> {
 
 /**
  * `vf feedback` (IN-792): the human false-positive correction channel. Records a misjudged
- * criterion so future runs downgrade it to `blocked` instead of re-flagging it.
+ * criterion so future runs downgrade it to `blocked` instead of re-flagging it. With `--probe`
+ * (or `--describe`, AI-synthesized + human-confirmed) it instead stores a corrected probe so the
+ * criterion actually verifies next run (IN-808).
  */
 async function cmdFeedback(args: Args, positionals: string[]): Promise<number> {
   const outputRoot = path.resolve(str(args.out) ?? ".verifyflow");
@@ -949,6 +956,50 @@ async function cmdFeedback(args: Args, positionals: string[]): Promise<number> {
   // --probe: supply a corrected probe so the criterion actually verifies next run (IN-808),
   // instead of just suppressing the false positive to `blocked`.
   const probeCmd = str(args.probe);
+  const describe = str(args.describe);
+  if (probeCmd && describe) {
+    console.error("error: use either --probe (you know the exact command) or --describe (the AI synthesizes it), not both.");
+    return 2;
+  }
+
+  // --describe: the operator knows the criterion was misjudged and what should happen, but not the
+  // exact command — the model synthesizes a probe from the run's context; persisted only after the
+  // human confirms (a wrong authoritative probe would turn into a confident product `fail`).
+  if (describe) {
+    const llm = await buildLlm(args);
+    const sug = await suggestProbeFromRun(llm, outputRoot, runId, criterionId, describe);
+    if (!sug.ok) {
+      console.error(sug.text);
+      return 1;
+    }
+    const probe = sug.probe!;
+    const exp = [
+      probe.expectExitCode !== undefined ? `exit ${probe.expectExitCode}` : "",
+      probe.expectSubstring ? `output contains "${probe.expectSubstring}"` : "",
+    ].filter(Boolean).join(", ");
+    console.error(`Suggested probe for ${cyan(criterionId)} ("${sug.criterionText!.slice(0, 70)}${sug.criterionText!.length > 70 ? "…" : ""}"):`);
+    console.error(`  $ ${bold(probe.command)}${exp ? `   ${dim(`(expect ${exp})`)}` : ""}`);
+    if (sug.rationale) console.error(`  ${dim(sug.rationale)}`);
+    if (!args.yes) {
+      if (!process.stdin.isTTY) {
+        console.error("error: confirming a suggested probe needs a TTY — re-run with --yes to accept it, or supply the exact command with --probe.");
+        return 2;
+      }
+      const ok = await confirm("Store it as the authoritative probe for this criterion? [y/N] ");
+      if (!ok) {
+        console.error("aborted — nothing stored. Adjust --describe and retry, or use --probe.");
+        return 0;
+      }
+    }
+    const res = await setProbeFromRun(store, outputRoot, runId, criterionId, { ...probe, fromTicket: true }, new Date().toISOString());
+    if (!res.ok) {
+      console.error(res.text);
+      return 1;
+    }
+    console.log(res.text);
+    return 0;
+  }
+
   if (probeCmd) {
     let expectExitCode: number | undefined;
     const ee = str(args["expect-exit"]);
