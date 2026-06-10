@@ -1,6 +1,6 @@
 # Publishing
 
-VerifyFlow is prepared to publish as `@humanbased-ai/verifyflow`.
+VerifyFlow is prepared to publish as `@humanbased/verifyflow`.
 
 ## Local preflight
 
@@ -23,7 +23,7 @@ vf --help
 
 The release workflows expect:
 
-- `NPM_TOKEN` with publish permission for `@humanbased-ai/verifyflow`
+- `NPM_TOKEN` with publish permission for `@humanbased/verifyflow`
 - `RELEASE_TOKEN` with permission to push release tags and create GitHub releases
 - optional `MAIL_USERNAME` and `MAIL_PASSWORD` if email release notifications are enabled later
 

@@ -41,7 +41,7 @@ have to export it again.
 After the first npm release:
 
 ```bash
-npm install -g @humanbased-ai/verifyflow
+npm install -g @humanbased/verifyflow
 vf doctor
 ```
 
